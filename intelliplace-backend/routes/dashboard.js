@@ -25,6 +25,10 @@ router.get('/admin/stats', authorizeAdmin, async (req, res) => {
     res.json({
       success: true,
       data: {
+        totalStudents,
+        totalCompanies,
+        totalJobs,
+        totalApplications,
       },
     });
   } catch (error) {
