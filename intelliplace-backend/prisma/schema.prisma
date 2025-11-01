@@ -1,0 +1,122 @@
+// Prisma Schema for IntelliPlace
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Student {
+  id           Int           @id @default(autoincrement())
+  name         String
+  email        String       @unique
+  password     String
+  rollNumber   String?      @map("roll_number")
+  phone        String?
+  applications Application[]
+  notifications Notification[]
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  @@map("students")
+  @@index([email])
+}
+
+model Company {
+  id          Int      @id @default(autoincrement())
+  companyName String   @map("company_name")
+  email       String   @unique
+  password    String
+  industry    String?
+  website     String?
+  phone       String?
+  jobs        Job[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("companies")
+  @@index([email])
+}
+
+model Job {
+  id          Int           @id @default(autoincrement())
+  title       String
+  description String
+  location    String?
+  type        String        // FULL_TIME, PART_TIME, INTERNSHIP, etc.
+  salary      String?
+  company     Company       @relation(fields: [companyId], references: [id])
+  companyId   Int          @map("company_id")
+  applications Application[]
+  interviews   Interview[]
+  status      String        @default("OPEN") // OPEN, CLOSED, DRAFT
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@map("jobs")
+  @@index([companyId])
+}
+
+model Application {
+  id        Int       @id @default(autoincrement())
+  student   Student   @relation(fields: [studentId], references: [id])
+  studentId Int      @map("student_id")
+  job       Job       @relation(fields: [jobId], references: [id])
+  jobId     Int      @map("job_id")
+  status    String    @default("PENDING") // PENDING, REVIEWING, REJECTED, SHORTLISTED, OFFERED, HIRED
+  interview Interview?
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@map("applications")
+  @@index([studentId])
+  @@index([jobId])
+}
+
+model Interview {
+  id            Int         @id @default(autoincrement())
+  application   Application @relation(fields: [applicationId], references: [id])
+  applicationId Int        @unique @map("application_id")
+  job          Job         @relation(fields: [jobId], references: [id])
+  jobId        Int        @map("job_id")
+  date         DateTime
+  type         String      // ONLINE, OFFLINE, PHONE
+  status       String      @default("SCHEDULED") // SCHEDULED, COMPLETED, CANCELLED
+  notes        String?
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  @@map("interviews")
+  @@index([applicationId])
+  @@index([jobId])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  student   Student  @relation(fields: [studentId], references: [id])
+  studentId Int     @map("student_id")
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("notifications")
+  @@index([studentId])
+  @@index([read])
+}
+
+model Admin {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("admins")
+  @@index([username])
+}
+
