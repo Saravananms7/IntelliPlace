@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import prisma from './lib/prisma.js';
 import authRoutes from './routes/auth.js';
 import dashboardRoutes from './routes/dashboard.js';
+import jobsRoutes from './routes/jobs.js';
+import path from 'path';
 import bcrypt from 'bcryptjs';
 
 dotenv.config();
@@ -21,9 +23,13 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve uploaded files (CVs)
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/jobs', jobsRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {

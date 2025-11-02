@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import Navbar from '../../components/Navbar';
 import { getCurrentUser } from '../../utils/auth';
+import CompanyPostJob from '../../components/CompanyPostJob';
 
 const CompanyDashboard = () => {
   const navigate = useNavigate();
@@ -53,6 +54,36 @@ const CompanyDashboard = () => {
 
     fetchStats();
   }, [user, navigate]);
+
+  // Fetch recent jobs posted by this company
+  const [jobs, setJobs] = useState([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+
+  const fetchJobs = async () => {
+    if (!user) return;
+    setJobsLoading(true);
+    try {
+      const res = await fetch(`http://localhost:5000/api/jobs?limit=10`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      const json = await res.json();
+      if (res.ok && json.data && Array.isArray(json.data.jobs)) {
+        // Filter jobs belonging to this company
+        const myJobs = json.data.jobs.filter(j => j.company && j.company.id === user.id);
+        setJobs(myJobs);
+      } else {
+        setJobs([]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch jobs for company:', err);
+      setJobs([]);
+    } finally {
+      setJobsLoading(false);
+    }
+  };
+
+  // fetch jobs when component mounts and when user changes
+  useEffect(() => { fetchJobs(); }, [user]);
 
   if (!user || user.userType !== 'company') {
     return null;
@@ -112,13 +143,7 @@ const CompanyDashboard = () => {
         >
           <h2 className="text-2xl font-bold text-gray-800 mb-6">Quick Actions</h2>
           <div className="grid md:grid-cols-3 gap-4">
-            <button className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-500 hover:bg-red-50 transition-all text-left group">
-              <div className="flex items-center justify-between mb-2">
-                <Plus className="w-8 h-8 text-gray-400 group-hover:text-red-500" />
-              </div>
-              <h3 className="font-semibold text-gray-800">Post New Job</h3>
-              <p className="text-sm text-gray-600">Create a new job posting</p>
-            </button>
+            <CompanyPostJob />
             <button className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-600 hover:bg-red-50 transition-all text-left group">
               <FileCheck className="w-8 h-8 text-gray-400 group-hover:text-red-600 mb-2" />
               <h3 className="font-semibold text-gray-800">View Applications</h3>

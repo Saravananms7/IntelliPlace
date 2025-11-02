@@ -15,6 +15,10 @@ model Student {
   email        String       @unique
   password     String
   rollNumber   String?      @map("roll_number")
+  cgpa         Float?       
+  backlog      Int?         
+  cvUrl        String?      @map("cv_url")
+  cvData       Bytes?       @map("cv_data")
   phone        String?
   applications Application[]
   notifications Notification[]
@@ -48,6 +52,9 @@ model Job {
   location    String?
   type        String        // FULL_TIME, PART_TIME, INTERNSHIP, etc.
   salary      String?
+  requiredSkills String?    @map("required_skills") // comma separated list
+  minCgpa     Float?       @map("min_cgpa")
+  allowBacklog Boolean?    @map("allow_backlog")
   company     Company       @relation(fields: [companyId], references: [id])
   companyId   Int          @map("company_id")
   applications Application[]
@@ -66,6 +73,11 @@ model Application {
   studentId Int      @map("student_id")
   job       Job       @relation(fields: [jobId], references: [id])
   jobId     Int      @map("job_id")
+  skills    String?   @map("skills")
+  cgpa      Float?    @map("cgpa")
+  backlog   Int?      @map("backlog")
+  cvUrl     String?   @map("cv_url")
+  cvData    Bytes?    @map("cv_data")
   status    String    @default("PENDING") // PENDING, REVIEWING, REJECTED, SHORTLISTED, OFFERED, HIRED
   interview Interview?
   createdAt DateTime  @default(now()) @map("created_at")

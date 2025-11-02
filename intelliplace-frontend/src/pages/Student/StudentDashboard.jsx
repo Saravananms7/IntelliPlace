@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import Navbar from '../../components/Navbar';
 import { getCurrentUser } from '../../utils/auth';
+import JobList from '../../components/JobList';
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
@@ -136,11 +137,8 @@ const StudentDashboard = () => {
           transition={{ delay: 0.6 }}
           className="bg-white rounded-xl shadow-lg p-8 border border-gray-200 mt-6"
         >
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">Recent Activity</h2>
-          <div className="text-center py-12">
-            <Bell className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600">No recent activity to display</p>
-          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-6">Browse Jobs</h2>
+          <JobList />
         </motion.div>
       </div>
     </div>

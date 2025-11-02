@@ -1,6 +1,5 @@
 import express from 'express';
 import prisma from '../lib/prisma.js';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
@@ -8,13 +7,12 @@ const router = express.Router();
 // Register Student
 router.post('/register/student', async (req, res) => {
   try {
-    const { name, email, password, rollNumber, phone } = req.body;
+  const { name, email, password, rollNumber, phone, cgpa, backlog } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, message: 'Name, email, and password are required' });
     }
 
-    // Check if email already exists
     const existingStudent = await prisma.student.findUnique({
       where: { email },
     });
@@ -23,21 +21,18 @@ router.post('/register/student', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email already registered' });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create student
     const student = await prisma.student.create({
       data: {
         name,
         email,
-        password: hashedPassword,
+        password, // saved directly (not hashed) - note: plain-text storage
         rollNumber: rollNumber || null,
         phone: phone || null,
+        cgpa: cgpa ? parseFloat(cgpa) : null,
+        backlog: backlog ? parseInt(backlog) : null,
       },
     });
 
-    // Generate JWT token
     const token = jwt.sign(
       { id: student.id, email: student.email, userType: 'student' },
       process.env.JWT_SECRET,
@@ -72,7 +67,6 @@ router.post('/register/company', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Company name, email, and password are required' });
     }
 
-    // Check if email already exists
     const existingCompany = await prisma.company.findUnique({
       where: { email },
     });
@@ -81,22 +75,17 @@ router.post('/register/company', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email already registered' });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create company
     const company = await prisma.company.create({
       data: {
         companyName,
         email,
-        password: hashedPassword,
+        password, // plain text
         industry: industry || null,
         website: website || null,
         phone: phone || null,
       },
     });
 
-    // Generate JWT token
     const token = jwt.sign(
       { id: company.id, email: company.email, userType: 'company' },
       process.env.JWT_SECRET,
@@ -133,23 +122,14 @@ router.post('/login/student', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email and password are required' });
     }
 
-    // Find student
     const student = await prisma.student.findUnique({
       where: { email },
     });
 
-    if (!student) {
+    if (!student || student.password !== password) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, student.password);
-
-    if (!isValidPassword) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-
-    // Generate JWT token
     const token = jwt.sign(
       { id: student.id, email: student.email, userType: 'student' },
       process.env.JWT_SECRET,
@@ -184,23 +164,14 @@ router.post('/login/company', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email and password are required' });
     }
 
-    // Find company
     const company = await prisma.company.findUnique({
       where: { email },
     });
 
-    if (!company) {
+    if (!company || company.password !== password) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, company.password);
-
-    if (!isValidPassword) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-
-    // Generate JWT token
     const token = jwt.sign(
       { id: company.id, email: company.email, userType: 'company' },
       process.env.JWT_SECRET,
@@ -237,37 +208,31 @@ router.post('/login/admin', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Username and password are required' });
     }
 
-    // Find admin
     const admin = await prisma.admin.findFirst({
       where: { username },
     });
 
-    if (!admin) {
+    if (!admin || admin.password !== password) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    // Direct password comparison for existing admin
-    if (password === admin.password) {
-      const token = jwt.sign(
-        { id: admin.id, username: admin.username, userType: 'admin' },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      );
+    const token = jwt.sign(
+      { id: admin.id, username: admin.username, userType: 'admin' },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
-      return res.json({
-        success: true,
-        message: 'Login successful',
-        user: {
-          id: admin.id,
-          username: admin.username,
-          name: 'Admin',
-          userType: 'admin',
-        },
-        token,
-      });
-    }
-
-    return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    res.json({
+      success: true,
+      message: 'Login successful',
+      user: {
+        id: admin.id,
+        username: admin.username,
+        name: 'Admin',
+        userType: 'admin',
+      },
+      token,
+    });
   } catch (error) {
     console.error('Admin login error:', error);
     res.status(500).json({ success: false, message: 'Server error during login' });
