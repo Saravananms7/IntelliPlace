@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Plus,
 } from 'lucide-react';
+import ApplicationsList from '../../components/ApplicationsList';
 import Navbar from '../../components/Navbar';
 import { getCurrentUser } from '../../utils/auth';
 import CompanyPostJob from '../../components/CompanyPostJob';
@@ -58,9 +59,12 @@ const CompanyDashboard = () => {
   // Fetch recent jobs posted by this company
   const [jobs, setJobs] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState(null);
+  const [isPostJobOpen, setIsPostJobOpen] = useState(false);
+  const [lastFetch, setLastFetch] = useState(0); // Track last fetch time
 
-  const fetchJobs = async () => {
-    if (!user) return;
+  const fetchJobs = async (userId) => {
+    if (!userId) return;
     setJobsLoading(true);
     try {
       const res = await fetch(`http://localhost:5000/api/jobs?limit=10`, {
@@ -69,7 +73,7 @@ const CompanyDashboard = () => {
       const json = await res.json();
       if (res.ok && json.data && Array.isArray(json.data.jobs)) {
         // Filter jobs belonging to this company
-        const myJobs = json.data.jobs.filter(j => j.company && j.company.id === user.id);
+        const myJobs = json.data.jobs.filter(j => j.company && j.company.id === userId);
         setJobs(myJobs);
       } else {
         setJobs([]);
@@ -79,11 +83,15 @@ const CompanyDashboard = () => {
       setJobs([]);
     } finally {
       setJobsLoading(false);
+      setLastFetch(Date.now()); // Update last fetch timestamp
     }
   };
 
-  // fetch jobs when component mounts and when user changes
-  useEffect(() => { fetchJobs(); }, [user]);
+  // fetch jobs when component mounts, when user changes, or when manually refreshed
+  useEffect(() => {
+    if (!user?.id || Date.now() - lastFetch < 1000) return; // Debounce fetches
+    fetchJobs(user.id);
+  }, [user?.id, lastFetch]);
 
   if (!user || user.userType !== 'company') {
     return null;
@@ -143,8 +151,21 @@ const CompanyDashboard = () => {
         >
           <h2 className="text-2xl font-bold text-gray-800 mb-6">Quick Actions</h2>
           <div className="grid md:grid-cols-3 gap-4">
-            <CompanyPostJob />
-            <button className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-600 hover:bg-red-50 transition-all text-left group">
+            <button 
+              onClick={() => setIsPostJobOpen(true)}
+              className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-600 hover:bg-red-50 transition-all text-left group"
+            >
+              <Plus className="w-8 h-8 text-gray-400 group-hover:text-red-600 mb-2" />
+              <h3 className="font-semibold text-gray-800">Post New Job</h3>
+              <p className="text-sm text-gray-600">Create a new job posting</p>
+            </button>
+            <button 
+              onClick={() => {
+                const jobsSection = document.querySelector('#recent-jobs');
+                if (jobsSection) jobsSection.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-600 hover:bg-red-50 transition-all text-left group"
+            >
               <FileCheck className="w-8 h-8 text-gray-400 group-hover:text-red-600 mb-2" />
               <h3 className="font-semibold text-gray-800">View Applications</h3>
               <p className="text-sm text-gray-600">Review candidate applications</p>
@@ -156,22 +177,130 @@ const CompanyDashboard = () => {
             </button>
           </div>
         </motion.div>
+        
+        {/* Post Job Modal */}
+        <CompanyPostJob
+          isOpen={isPostJobOpen}
+          onClose={() => setIsPostJobOpen(false)}
+          onCreated={() => {
+            setIsPostJobOpen(false);
+            fetchJobs(user.id);
+          }}
+        />
 
         {/* Recent Jobs */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
+          id="recent-jobs"
           className="bg-white rounded-xl shadow-lg p-8 border border-gray-200 mt-6"
         >
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">Recent Job Postings</h2>
-          <div className="text-center py-12">
-            <Briefcase className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600">No job postings yet</p>
-            <button className="mt-4 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
-              Post Your First Job
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">Job Postings</h2>
+            <button
+              onClick={() => setIsPostJobOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Post New Job
             </button>
           </div>
+
+          {jobsLoading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading jobs...</p>
+            </div>
+          ) : jobs.length === 0 ? (
+            <div className="text-center py-12">
+              <Briefcase className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600">No job postings yet</p>
+              <button 
+                onClick={() => setIsPostJobOpen(true)}
+                className="mt-4 inline-flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Post Your First Job
+              </button>
+            </div>
+          ) : (
+            <div className="grid gap-6 md:grid-cols-2">
+              {jobs.map(job => (
+                <motion.div
+                  key={job.id}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="group bg-white border rounded-xl shadow-sm hover:shadow-md transition-all p-6"
+                >
+                  <div className="flex flex-col h-full">
+                    <div className="flex-grow">
+                      <div className="flex items-start justify-between gap-4">
+                        <h3 className="text-lg font-semibold text-gray-800 group-hover:text-red-600 transition-colors">
+                          {job.title}
+                        </h3>
+                        <span className={`px-3 py-1 text-xs font-medium rounded-full ${
+                          job.type === 'FULL_TIME' ? 'bg-green-100 text-green-800' :
+                          job.type === 'PART_TIME' ? 'bg-blue-100 text-blue-800' :
+                          job.type === 'CONTRACT' ? 'bg-purple-100 text-purple-800' :
+                          'bg-orange-100 text-orange-800'
+                        }`}>
+                          {job.type.replace('_', ' ')}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 text-sm text-gray-600 line-clamp-2">
+                        {job.description}
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        <div className="flex items-center text-sm text-gray-600">
+                          <span className="font-medium">Location:</span>
+                          <span className="ml-2">{job.location || 'Remote'}</span>
+                        </div>
+                        {job.salary && (
+                          <div className="flex items-center text-sm text-gray-600">
+                            <span className="font-medium">Salary:</span>
+                            <span className="ml-2">{job.salary}</span>
+                          </div>
+                        )}
+                        {job.requiredSkills && (
+                          <div className="flex flex-wrap gap-1">
+                            {typeof job.requiredSkills === 'string' 
+                              ? job.requiredSkills.split(',').map((skill, index) => (
+                                <span key={index} className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">
+                                  {skill.trim()}
+                                </span>
+                              ))
+                              : job.requiredSkills.map((skill, index) => (
+                                <span key={index} className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">
+                                  {skill}
+                                </span>
+                              ))
+                            }
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-6 pt-4 border-t flex items-center justify-between">
+                      <div className="text-xs text-gray-500">
+                        Posted {new Date(job.createdAt).toLocaleDateString()}
+                      </div>
+                      <button
+                        onClick={() => setSelectedJobId(job.id)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                      >
+                        <Users className="w-4 h-4" />
+                        View Applications
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
+          {selectedJobId && <ApplicationsList jobId={selectedJobId} onClose={() => setSelectedJobId(null)} />}
         </motion.div>
       </div>
     </div>

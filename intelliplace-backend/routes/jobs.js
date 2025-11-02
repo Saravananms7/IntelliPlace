@@ -2,12 +2,49 @@ import express from 'express';
 import prisma from '../lib/prisma.js';
 import { authenticateToken } from '../middleware/auth.js';
 import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
-// Multer setup for CV uploads (memory storage so we can save bytes to DB)
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, '../uploads/cvs');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Multer setup for CV uploads with disk storage
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function (req, file, cb) {
+    // Create unique filename with student ID and timestamp
+    const uniqueSuffix = `${req.user.id}-${Date.now()}`;
+    cb(null, `cv-${uniqueSuffix}${path.extname(file.originalname)}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    // Allow only pdf, doc, docx
+    const allowedTypes = ['.pdf', '.doc', '.docx'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only PDF, DOC, and DOCX files are allowed.'));
+    }
+  },
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  }
+});
 
 // Helper role checks
 const authorizeCompany = (req, res, next) => {
@@ -91,15 +128,18 @@ router.post('/:jobId/apply', authenticateToken, authorizeStudent, upload.single(
     const existing = await prisma.application.findFirst({ where: { studentId, jobId } });
     if (existing) return res.status(400).json({ success: false, message: 'Already applied to this job' });
 
-    // If CV uploaded, get buffer and save bytes to DB (application and optionally student profile)
-    let cvBuffer = null;
-    if (file && file.buffer) {
-      cvBuffer = file.buffer;
-      // Save CV bytes on student profile as well
-      await prisma.student.update({ where: { id: studentId }, data: { cvData: cvBuffer } });
+    // If CV uploaded, save the file path
+    let cvUrl = null;
+    if (file) {
+      cvUrl = `/uploads/cvs/${file.filename}`;
+      // Update student profile with latest CV URL
+      await prisma.student.update({
+        where: { id: studentId },
+        data: { cvUrl }
+      });
     }
 
-    // Create application with optional applicant details (store CV bytes in DB)
+    // Create application with optional applicant details
     const application = await prisma.application.create({
       data: {
         studentId,
@@ -107,7 +147,7 @@ router.post('/:jobId/apply', authenticateToken, authorizeStudent, upload.single(
         skills: skills ? (Array.isArray(skills) ? skills.join(',') : String(skills)) : null,
         cgpa: cgpa ? parseFloat(cgpa) : null,
         backlog: backlog ? parseInt(backlog) : null,
-        cvData: cvBuffer || null,
+        cvUrl,
       }
     });
 
@@ -118,7 +158,78 @@ router.post('/:jobId/apply', authenticateToken, authorizeStudent, upload.single(
   }
 });
 
+// Student: get my applications
+router.get('/my-applications', authenticateToken, authorizeStudent, async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const applications = await prisma.application.findMany({
+      where: { studentId },
+      include: { job: { include: { company: true } } }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        applications: applications.map(app => ({
+          ...app,
+          cvBase64: undefined // Don't send CV data back
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching student applications:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching applications' });
+  }
+});
+
 // Company: list applicants for a job (include student details and cv)
+// Serve CV files
+router.get('/cv/:filename', authenticateToken, async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const filePath = path.join(uploadsDir, filename);
+    
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, message: 'CV file not found' });
+    }
+
+    // Security check - verify the user has access to this CV
+    const cvPath = `/uploads/cvs/${filename}`;
+    const application = await prisma.application.findFirst({
+      where: {
+        OR: [
+          { cvUrl: cvPath },
+          { student: { cvUrl: cvPath } }
+        ],
+        OR: [
+          { studentId: req.user.id }, // Student can access their own CV
+          { job: { companyId: req.user.id } } // Company can access CVs of their job applicants
+        ]
+      }
+    });
+
+    if (!application) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    // Set appropriate content type based on file extension
+    const ext = path.extname(filename).toLowerCase();
+    const contentType = ext === '.pdf' ? 'application/pdf' :
+                       ext === '.doc' ? 'application/msword' :
+                       ext === '.docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
+                       'application/octet-stream';
+    
+    // Set response headers
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename=${filename}`);
+    res.sendFile(filePath);
+  } catch (error) {
+    console.error('Error serving CV:', error);
+    res.status(500).json({ success: false, message: 'Server error serving CV' });
+  }
+});
+
 router.get('/:jobId/applicants', authenticateToken, authorizeCompany, async (req, res) => {
   try {
     const companyId = req.user.id;
@@ -138,7 +249,7 @@ router.get('/:jobId/applicants', authenticateToken, authorizeCompany, async (req
       skills: app.skills,
       cgpa: app.cgpa,
       backlog: app.backlog,
-      cvBase64: app.cvData ? app.cvData.toString('base64') : (app.student && app.student.cvData ? app.student.cvData.toString('base64') : null),
+      cvUrl: app.cvUrl || (app.student && app.student.cvUrl) || null,
       student: app.student ? {
         id: app.student.id,
         name: app.student.name,

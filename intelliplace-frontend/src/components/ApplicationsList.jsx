@@ -32,27 +32,59 @@ const ApplicationsList = ({ jobId, onClose }) => {
     if (jobId) fetchApplications();
   }, [jobId]);
 
-  const downloadCV = (application) => {
-    if (!application.cvBase64) {
+  const [previewCV, setPreviewCV] = useState(null);
+  
+  const downloadCV = async (application) => {
+    if (!application.cvUrl) {
       alert('No CV available for this applicant');
       return;
     }
 
-    // Convert base64 to blob and create download link
-    const binary = atob(application.cvBase64);
-    const array = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      array[i] = binary.charCodeAt(i);
+    try {
+      const cvId = application.cvUrl.split('/').pop();
+      console.log('Downloading CV:', cvId);
+      
+      // Request the CV file from the server
+      const response = await fetch(`http://localhost:5000/api/jobs/cv/${cvId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to download CV:', await response.text());
+        throw new Error('Failed to download CV');
+      }
+      
+      const blob = await response.blob();
+      console.log('Received blob:', blob.type, blob.size);
+      const url = URL.createObjectURL(blob);
+
+      // If it's a PDF, show preview
+      const isPDF = blob.type === 'application/pdf' || cvId.toLowerCase().endsWith('.pdf');
+      console.log('File type:', blob.type, 'Is PDF:', isPDF);
+      
+      if (isPDF) {
+        console.log('Setting up PDF preview');
+        setPreviewCV({
+          url,
+          name: `${application.student.name}'s CV`,
+          studentName: application.student.name
+        });
+      } else {
+        // For non-PDF files, download directly
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || `CV_${application.student.name.replace(/\\s+/g, '_')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error('Failed to download CV:', err);
+      alert('Failed to download CV. Please try again.');
     }
-    const blob = new Blob([array], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `CV_${application.student.name.replace(/\\s+/g, '_')}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -101,26 +133,78 @@ const ApplicationsList = ({ jobId, onClose }) => {
                       <div className="mt-2 grid grid-cols-2 gap-4">
                         <div>
                           <p className="text-sm text-gray-600">CGPA</p>
-                          <p className="font-medium">{app.student.cgpa || 'Not provided'}</p>
+                          <div className="flex items-baseline gap-2">
+                            <p className="font-medium text-lg">{app.cgpa || app.student.cgpa || 'Not provided'}</p>
+                            {app.cgpa !== app.student.cgpa && app.student.cgpa && (
+                              <span className="text-xs text-gray-500">(Profile: {app.student.cgpa})</span>
+                            )}
+                          </div>
                         </div>
                         <div>
                           <p className="text-sm text-gray-600">Backlog</p>
-                          <p className="font-medium">{app.student.backlog !== null ? app.student.backlog : 'Not provided'}</p>
+                          <div className="flex items-baseline gap-2">
+                            <p className="font-medium text-lg">{app.backlog !== null ? app.backlog : (app.student.backlog !== null ? app.student.backlog : 'Not provided')}</p>
+                            {app.backlog !== app.student.backlog && app.student.backlog !== null && (
+                              <span className="text-xs text-gray-500">(Profile: {app.student.backlog})</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 pt-4 border-t">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div>
+                              <p className="text-sm text-gray-600">Applied</p>
+                              <p className="font-medium">{new Date(app.createdAt).toLocaleDateString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-600">Status</p>
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                app.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                                app.status === 'REVIEWING' ? 'bg-blue-100 text-blue-800' :
+                                app.status === 'SHORTLISTED' ? 'bg-green-100 text-green-800' :
+                                app.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
+                                app.status === 'HIRED' ? 'bg-purple-100 text-purple-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {app.status}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-5">
+                            
+                            <button 
+                              onClick={() => window.location.href = `mailto:${app.student.email}`}
+                              className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+                            >
+                              <Mail className="w-4 h-4" />
+                              Email
+                            </button>
+                            {app.student.phone && (
+                              <button 
+                                onClick={() => window.location.href = `tel:${app.student.phone}`}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+                              >
+                                <Phone className="w-4 h-4" />
+                                Call
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
                     <div>
                       <button
                         onClick={() => downloadCV(app)}
-                        disabled={!app.cvBase64}
+                        disabled={!app.cvUrl}
                         className={`flex items-center gap-2 px-4 py-2 rounded ${
-                          app.cvBase64
+                          app.cvUrl
                             ? 'bg-red-600 text-white hover:bg-red-700'
                             : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         }`}
                       >
                         <Download className="w-4 h-4" />
-                        {app.cvBase64 ? 'Download CV' : 'No CV'}
+                        {app.cvUrl ? 'View CV' : 'No CV'}
                       </button>
                     </div>
                   </div>
@@ -134,6 +218,55 @@ const ApplicationsList = ({ jobId, onClose }) => {
           )}
         </div>
       </div>
+
+      {/* CV Preview Modal */}
+      {previewCV && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-4xl h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold text-gray-800">{previewCV.name}</h3>
+              <div className="space-x-2">
+                <a
+                  href={previewCV.url}
+                  download={`CV_${previewCV.studentName.replace(/\s+/g, '_')}.pdf`}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700"
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </a>
+                <button
+                  onClick={() => {
+                    URL.revokeObjectURL(previewCV.url);
+                    setPreviewCV(null);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 bg-gray-100 rounded-lg relative overflow-hidden">
+              <iframe
+                src={previewCV.url}
+                className="w-full h-full rounded-lg"
+                title="CV Preview"
+                onError={(e) => {
+                  console.error('Failed to load PDF preview:', e);
+                  // Fallback to download if preview fails
+                  const a = document.createElement('a');
+                  a.href = previewCV.url;
+                  a.download = `CV_${previewCV.studentName.replace(/\s+/g, '_')}.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(previewCV.url);
+                  setPreviewCV(null);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
