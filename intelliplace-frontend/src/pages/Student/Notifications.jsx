@@ -10,7 +10,8 @@ const Notifications = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!user || user.userType !== 'student') {
+    const currentUser = getCurrentUser();
+    if (!currentUser || currentUser.userType !== 'student') {
       navigate('/student/login');
       return;
     }
@@ -29,7 +30,7 @@ const Notifications = () => {
     };
 
     fetchNotifications();
-  }, [user, navigate]);
+  }, [navigate]);
 
   const markReadAndOpen = async (notif) => {
     try {
@@ -70,7 +71,35 @@ const Notifications = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       <Navbar />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <h1 className="text-2xl font-bold mb-4">Notifications</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">Notifications</h1>
+          <div>
+            <button
+              onClick={async () => {
+                if (!notifications || notifications.length === 0) return;
+                const hasUnread = notifications.some(n => !n.read);
+                if (!hasUnread) return;
+                try {
+                  setLoading(true);
+                  const res = await fetch('http://localhost:5000/api/notifications/mark-all-read', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                  });
+                  const json = await res.json();
+                  if (!res.ok) throw new Error(json.message || 'Failed to mark all read');
+                  setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                } catch (err) {
+                  console.error('Failed to mark all read', err);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              className="px-3 py-1 text-sm rounded-md bg-gray-100 border hover:bg-gray-200"
+            >
+              Mark all read
+            </button>
+          </div>
+        </div>
 
         {loading ? (
           <div className="py-8 text-center">Loading...</div>

@@ -10,7 +10,8 @@ const MyApplications = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!user || user.userType !== 'student') {
+    const currentUser = getCurrentUser();
+    if (!currentUser || currentUser.userType !== 'student') {
       navigate('/student/login');
       return;
     }
@@ -29,7 +30,7 @@ const MyApplications = () => {
     };
 
     fetchApplications();
-  }, [user, navigate]);
+  }, [navigate]);
 
   const viewCV = async (cvUrl) => {
     if (!cvUrl) return;

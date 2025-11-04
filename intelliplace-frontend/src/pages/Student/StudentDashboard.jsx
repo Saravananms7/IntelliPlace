@@ -23,14 +23,15 @@ const StudentDashboard = () => {
   ]);
 
   useEffect(() => {
-    if (!user || user.userType !== 'student') {
+    const currentUser = getCurrentUser();
+    if (!currentUser || currentUser.userType !== 'student') {
       navigate('/student/login');
       return;
     }
 
     const fetchStats = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/dashboard/student/stats/${user.id}`, {
+        const response = await fetch(`http://localhost:5000/api/dashboard/student/stats/${currentUser.id}`, {
           headers: {
             Authorization: `Bearer ${localStorage.getItem('token')}`,
           },
@@ -52,7 +53,7 @@ const StudentDashboard = () => {
     };
 
     fetchStats();
-  }, [user, navigate]);
+  }, [navigate]);
 
   if (!user || user.userType !== 'student') {
     return null;
@@ -112,7 +113,17 @@ const StudentDashboard = () => {
         >
           <h2 className="text-2xl font-bold text-gray-800 mb-6">Quick Actions</h2>
           <div className="grid md:grid-cols-3 gap-4">
-            <button onClick={() => navigate('/')} className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-500 hover:bg-red-50 transition-all text-left">
+            <button
+              onClick={() => {
+                const el = document.getElementById('browse-jobs');
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } else {
+                  navigate('/');
+                }
+              }}
+              className="p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-500 hover:bg-red-50 transition-all text-left"
+            >
               <FileText className="w-8 h-8 text-gray-400 mb-2" />
               <h3 className="font-semibold text-gray-800">Browse Jobs</h3>
               <p className="text-sm text-gray-600">Explore available opportunities</p>
@@ -135,6 +146,7 @@ const StudentDashboard = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
+          id="browse-jobs"
           className="bg-white rounded-xl shadow-lg p-8 border border-gray-200 mt-6"
         >
           <h2 className="text-2xl font-bold text-gray-800 mb-6">Browse Jobs</h2>
