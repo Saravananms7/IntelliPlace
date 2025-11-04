@@ -225,6 +225,7 @@ router.post('/:jobId/shortlist', authenticateToken, authorizeCompany, async (req
             studentId: app.studentId,
             title: `Application ${newStatus}`,
             message: `Your application for ${job.title} has been ${newStatus.toLowerCase()}. ${decisionReason}`,
+            decisionReason,
             jobId: jobId,
             applicationId: app.id
           }
