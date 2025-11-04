@@ -54,4 +54,40 @@ router.post('/mark-all-read', authenticateToken, authorizeStudent, async (req, r
   }
 });
 
+// Open a notification: mark as read and return linked resource (application or job) so client can navigate
+router.get('/:id/open', authenticateToken, authorizeStudent, async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const id = parseInt(req.params.id);
+    const notif = await prisma.notification.findUnique({ where: { id } });
+    if (!notif || notif.studentId !== studentId) return res.status(404).json({ success: false, message: 'Notification not found or access denied' });
+
+    // Mark as read if not already
+    if (!notif.read) {
+      await prisma.notification.update({ where: { id }, data: { read: true } });
+    }
+
+    // If notification references an application, return it (with job/company)
+    if (notif.applicationId) {
+      const application = await prisma.application.findUnique({
+        where: { id: notif.applicationId },
+        include: { job: { include: { company: true } }, student: true }
+      });
+      return res.json({ success: true, data: { notification: notif, application } });
+    }
+
+    // If it references a job, return the job
+    if (notif.jobId) {
+      const job = await prisma.job.findUnique({ where: { id: notif.jobId }, include: { company: true } });
+      return res.json({ success: true, data: { notification: notif, job } });
+    }
+
+    // Default: return the notification only
+    return res.json({ success: true, data: { notification: notif } });
+  } catch (error) {
+    console.error('Error opening notification:', error);
+    res.status(500).json({ success: false, message: 'Server error opening notification' });
+  }
+});
+
 export default router;

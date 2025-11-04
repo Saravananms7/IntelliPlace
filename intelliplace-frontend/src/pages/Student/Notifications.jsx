@@ -33,30 +33,35 @@ const Notifications = () => {
 
   const markReadAndOpen = async (notif) => {
     try {
-      // Mark as read
-      await fetch(`http://localhost:5000/api/notifications/${notif.id}/read`, {
-        method: 'PATCH',
+      const res = await fetch(`http://localhost:5000/api/notifications/${notif.id}/open`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-      // Optimistically update UI
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || 'Failed to open notification');
+
+      // Update UI: mark as read
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-    } catch (err) {
-      console.error('Failed to mark read', err);
-    }
 
-    // If notification has a jobId or applicationId, navigate directly
-    if (notif.jobId) {
-      navigate(`/jobs/${notif.jobId}`);
-      return;
-    }
-    if (notif.applicationId) {
-      // Navigate to My Applications for now; enhancement: open specific application detail
+      const payload = json.data || {};
+      if (payload.application) {
+        navigate(`/student/applications/${payload.application.id}`);
+        return;
+      }
+      if (payload.job) {
+        navigate(`/jobs/${payload.job.id}`);
+        return;
+      }
+
+      // Fallback
       navigate('/student/applications');
-      return;
+    } catch (err) {
+      console.error('Failed to open notification', err);
+      // fallback behavior
+      try { setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n)); } catch(e){}
+      if (notif.applicationId) navigate(`/student/applications/${notif.applicationId}`);
+      else if (notif.jobId) navigate(`/jobs/${notif.jobId}`);
+      else navigate('/student/applications');
     }
-
-    // Default fallback
-    navigate('/student/applications');
   };
 
   if (!user || user.userType !== 'student') return null;

@@ -88,7 +88,10 @@ const MyApplications = () => {
                   ) : (
                     <div className="text-xs text-gray-500">No CV</div>
                   )}
-                  <button onClick={() => navigate(`/jobs/${app.jobId}`)} className="px-3 py-1 border rounded-md text-sm">Open Job</button>
+                  <div className="flex gap-2">
+                    <button onClick={() => navigate(`/jobs/${app.jobId}`)} className="px-3 py-1 border rounded-md text-sm">Open Job</button>
+                    <button onClick={() => navigate(`/student/applications/${app.id}`)} className="px-3 py-1 bg-gray-100 rounded-md text-sm">View Details</button>
+                  </div>
                 </div>
               </div>
             ))}
