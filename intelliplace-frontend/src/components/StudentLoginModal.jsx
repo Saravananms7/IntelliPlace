@@ -136,7 +136,7 @@ const StudentLoginModal = ({ isOpen, onClose }) => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="block w-full pl-10 pr-4 py-3 bg-gray-800/50 border border-gray-600/50 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all duration-300"
-                      placeholder="student@university.edu"
+                      placeholder="student@university.in"
                       required
                     />
                   </div>
