@@ -96,7 +96,9 @@ const ApplicationDetail = () => {
             {application.decisionReason && (
               <div className="mb-4">
                 <div className="text-sm text-gray-600">Decision Reason</div>
-                <div className="text-sm italic text-gray-700 mt-1">{application.decisionReason}</div>
+                <div className={`text-sm italic mt-1 ${application.status && application.status.toLowerCase().includes('reject') ? 'text-red-700' : 'text-gray-700'}`}>
+                  {application.decisionReason}
+                </div>
               </div>
             )}
 
