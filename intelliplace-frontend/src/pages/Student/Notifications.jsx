@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
+import CvPreviewModal from '../../components/CvPreviewModal';
 import { getCurrentUser } from '../../utils/auth';
 
 const Notifications = () => {
@@ -190,52 +191,7 @@ const Notifications = () => {
             ))}
           </div>
         )}
-      {/* Inline CV preview modal */}
-      {preview && (
-        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-4xl h-[80vh] flex flex-col">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-semibold text-gray-800">{preview.name}</h3>
-              <div className="space-x-2">
-                <a
-                  href={preview.url}
-                  download={`CV_${preview.name.replace(/\s+/g, '_')}.pdf`}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700"
-                >
-                  Download
-                </a>
-                <button
-                  onClick={() => {
-                    URL.revokeObjectURL(preview.url);
-                    setPreview(null);
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 min-h-0 bg-gray-100 rounded-lg relative overflow-hidden">
-              <iframe
-                src={preview.url}
-                className="w-full h-full rounded-lg"
-                title="CV Preview"
-                onError={(e) => {
-                  console.error('Failed to load PDF preview:', e);
-                  const a = document.createElement('a');
-                  a.href = preview.url;
-                  a.download = `CV_${preview.name.replace(/\s+/g, '_')}.pdf`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(preview.url);
-                  setPreview(null);
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <CvPreviewModal preview={preview} onClose={() => setPreview(null)} />
       </div>
     </div>
   );

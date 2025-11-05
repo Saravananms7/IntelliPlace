@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Navbar from '../../components/Navbar';
+import CvPreviewModal from '../../components/CvPreviewModal';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentUser } from '../../utils/auth';
 
@@ -8,6 +9,7 @@ const MyApplications = () => {
   const user = getCurrentUser();
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState(null);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -49,7 +51,7 @@ const MyApplications = () => {
       }
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      setPreview({ url, name: filename });
     } catch (err) {
       console.error('Error fetching CV', err);
       alert('Failed to open CV');
@@ -103,6 +105,7 @@ const MyApplications = () => {
           </div>
         )}
       </div>
+      <CvPreviewModal preview={preview} onClose={() => setPreview(null)} />
     </div>
   );
 };
