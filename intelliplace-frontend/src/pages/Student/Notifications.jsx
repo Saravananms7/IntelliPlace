@@ -48,7 +48,8 @@ const Notifications = () => {
 
       const payload = json.data || {};
       if (payload.application) {
-        navigate(`/student/applications/${payload.application.id}`);
+        // application details are shown inline on the applications page now
+        navigate('/student/applications');
         return;
       }
       if (payload.job) {
@@ -62,8 +63,8 @@ const Notifications = () => {
       console.error('Failed to open notification', err);
       // fallback behavior
       try { setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n)); } catch(e){}
-      if (notif.applicationId) navigate(`/student/applications/${notif.applicationId}`);
-      else if (notif.jobId) navigate(`/jobs/${notif.jobId}`);
+  if (notif.applicationId) navigate('/student/applications');
+  else if (notif.jobId) navigate(`/jobs/${notif.jobId}`);
       else navigate('/student/applications');
     }
   };

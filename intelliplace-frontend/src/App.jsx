@@ -7,7 +7,6 @@ import StudentRegister from './pages/Student/StudentRegister';
 import StudentDashboard from './pages/Student/StudentDashboard';
 import Notifications from './pages/Student/Notifications';
 import MyApplications from './pages/Student/MyApplications';
-import ApplicationDetail from './pages/Student/ApplicationDetail';
 import CompanyLogin from './pages/Company/CompanyLogin';
 import CompanyRegister from './pages/Company/CompanyRegister';
 import CompanyDashboard from './pages/Company/CompanyDashboard';
@@ -25,7 +24,6 @@ function App() {
         <Route path="/student/dashboard" element={<StudentDashboard />} />
   <Route path="/student/notifications" element={<Notifications />} />
   <Route path="/student/applications" element={<MyApplications />} />
-  <Route path="/student/applications/:id" element={<ApplicationDetail />} />
         
         {/* Company Routes */}
         <Route path="/company/login" element={<CompanyLogin />} />
