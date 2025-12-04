@@ -43,13 +43,80 @@ const authorizeStudent = (req, res, next) => {
   next();
 };
 
-// Create a new job (company only)
-router.post('/', authenticateToken, authorizeCompany, async (req, res) => {
+// Create a new job (company only) - supports both JSON and multipart/form-data
+router.post('/', authenticateToken, authorizeCompany, upload.single('jobDescriptionFile'), async (req, res) => {
   try {
     const companyId = req.user.id;
-    const { title, description, location, type, salary, requiredSkills, minCgpa, allowBacklog } = req.body;
+    
+    // Verify company exists
+    const company = await prisma.company.findUnique({
+      where: { id: companyId }
+    });
+    
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'Company not found. Please log in again.' });
+    }
+    
+    // Handle both JSON and form-data
+    let title, description, location, type, salary, requiredSkills, minCgpa, allowBacklog, maxBacklog;
+    
+    if (req.file) {
+      // Multipart form-data
+      title = req.body.title;
+      description = req.body.description;
+      location = req.body.location || null;
+      type = req.body.type;
+      salary = req.body.salary || null;
+      requiredSkills = req.body.requiredSkills;
+      minCgpa = req.body.minCgpa;
+      allowBacklog = req.body.allowBacklog;
+      maxBacklog = req.body.maxBacklog;
+    } else {
+      // JSON
+      ({ title, description, location, type, salary, requiredSkills, minCgpa, allowBacklog, maxBacklog } = req.body);
+    }
 
     if (!title || !description || !type) return res.status(400).json({ success: false, message: 'Title, description and type are required' });
+
+    // Handle job description file upload if present
+    let jobDescriptionFileUrl = null;
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      const filePath = `job-descriptions/${companyId}-${Date.now()}${ext}`; // path inside bucket
+
+      const { error: uploadError } = await supabase.storage
+        .from('job-descriptions')              // bucket name
+        .upload(filePath, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error('Supabase upload error:', uploadError);
+        return res.status(500).json({ success: false, message: 'Error uploading job description file' });
+      }
+
+      // Get a public URL (if bucket is public)
+      const { data: publicData } = supabase.storage
+        .from('job-descriptions')
+        .getPublicUrl(filePath);
+
+      jobDescriptionFileUrl = publicData.publicUrl;
+    }
+
+    // Parse requiredSkills if it's a string (from form-data)
+    let parsedSkills = null;
+    if (requiredSkills) {
+      if (typeof requiredSkills === 'string') {
+        try {
+          parsedSkills = JSON.parse(requiredSkills);
+        } catch {
+          parsedSkills = requiredSkills.split(',').map(s => s.trim()).filter(s => s);
+        }
+      } else if (Array.isArray(requiredSkills)) {
+        parsedSkills = requiredSkills;
+      }
+    }
 
     const job = await prisma.job.create({
       data: {
@@ -58,9 +125,11 @@ router.post('/', authenticateToken, authorizeCompany, async (req, res) => {
         location: location || null,
         type,
         salary: salary || null,
-        requiredSkills: requiredSkills ? (Array.isArray(requiredSkills) ? requiredSkills.join(',') : String(requiredSkills)) : null,
+        requiredSkills: parsedSkills ? (Array.isArray(parsedSkills) ? parsedSkills.join(',') : String(parsedSkills)) : null,
         minCgpa: minCgpa ? parseFloat(minCgpa) : null,
         allowBacklog: allowBacklog === 'true' || allowBacklog === true ? true : false,
+        maxBacklog: maxBacklog ? parseInt(maxBacklog) : null,
+        jobDescriptionFileUrl: jobDescriptionFileUrl || null,
         companyId: companyId
       }
     });
@@ -68,7 +137,16 @@ router.post('/', authenticateToken, authorizeCompany, async (req, res) => {
     res.status(201).json({ success: true, message: 'Job created', data: job });
   } catch (error) {
     console.error('Error creating job:', error);
-    res.status(500).json({ success: false, message: 'Server error creating job' });
+    
+    // Handle Prisma foreign key constraint errors
+    if (error.code === 'P2003') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid company ID. Please log out and log in again.' 
+      });
+    }
+    
+    res.status(500).json({ success: false, message: 'Server error creating job', error: error.message });
   }
 });
 
@@ -205,6 +283,14 @@ router.post('/:jobId/shortlist', authenticateToken, authorizeCompany, async (req
       if (job.allowBacklog === false || job.allowBacklog === null || job.allowBacklog === undefined) {
         // If allowBacklog is falsy, require zero backlogs
         passesBacklog = (appBacklog === 0);
+      } else if (job.allowBacklog === true) {
+        // If allowBacklog is true, check maxBacklog limit if specified
+        if (typeof job.maxBacklog === 'number') {
+          passesBacklog = (appBacklog <= job.maxBacklog);
+        } else {
+          // If allowBacklog is true but no maxBacklog specified, allow any number of backlogs
+          passesBacklog = true;
+        }
       }
 
       const newStatus = (passesCgpa && passesBacklog) ? 'SHORTLISTED' : 'REJECTED';
@@ -219,7 +305,13 @@ router.post('/:jobId/shortlist', authenticateToken, authorizeCompany, async (req
           reasons.push(`CGPA ${appCgpa === null ? 'N/A' : appCgpa} < required ${job.minCgpa}`);
         }
         if (!passesBacklog) {
-          reasons.push(`Active backlogs ${appBacklog} not allowed`);
+          if (job.allowBacklog === false || job.allowBacklog === null || job.allowBacklog === undefined) {
+            reasons.push(`Active backlogs ${appBacklog} not allowed`);
+          } else if (job.allowBacklog === true && typeof job.maxBacklog === 'number') {
+            reasons.push(`Active backlogs ${appBacklog} exceeds maximum allowed ${job.maxBacklog}`);
+          } else {
+            reasons.push(`Active backlogs ${appBacklog} not allowed`);
+          }
         }
         decisionReason = `Rejected — ${reasons.join('; ')}`;
       }

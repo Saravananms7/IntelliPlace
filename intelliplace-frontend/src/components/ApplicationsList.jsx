@@ -40,7 +40,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
 
   const [previewCV, setPreviewCV] = useState(null);
 
-  // ✅ NEW: Use Supabase URL directly, no backend /cv route, no blob
+  
   const downloadCV = (application) => {
     if (!application.cvUrl) {
       alert('No CV available for this applicant');

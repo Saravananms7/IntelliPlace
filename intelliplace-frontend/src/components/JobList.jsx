@@ -7,7 +7,11 @@ import {
   Briefcase,
   MapPin,
   GraduationCap,
-  X
+  X,
+  FileText,
+  Globe,
+  DollarSign,
+  Eye
 } from 'lucide-react';
 import { getCurrentUser } from '../utils/auth';
 
@@ -18,6 +22,7 @@ const JobList = () => {
   const [applyState, setApplyState] = useState({ cgpa: '', backlog: '', cv: null });
   const [message, setMessage] = useState(null);
   const [appliedJobs, setAppliedJobs] = useState(new Set());
+  const [previewJobDesc, setPreviewJobDesc] = useState(null);
 
   const fetchJobs = async () => {
     setLoading(true);
@@ -57,6 +62,38 @@ const JobList = () => {
     if (name === 'cv') setApplyState(s => ({ ...s, cv: files[0] }));
     else setApplyState(s => ({ ...s, [name]: value }));
   }
+
+  const handleJobDescriptionFile = async (job) => {
+    if (!job.jobDescriptionFileUrl) {
+      alert('No job description file available');
+      return;
+    }
+
+    try {
+      // If it's a PDF, show preview
+      const isPDF = job.jobDescriptionFileUrl.toLowerCase().endsWith('.pdf');
+      
+      if (isPDF) {
+        setPreviewJobDesc({
+          url: job.jobDescriptionFileUrl,
+          name: `${job.title} - Job Description`,
+          jobTitle: job.title
+        });
+      } else {
+        // For non-PDF files, download directly
+        const a = document.createElement('a');
+        a.href = job.jobDescriptionFileUrl;
+        a.download = `Job_Description_${job.title.replace(/\s+/g, '_')}${job.jobDescriptionFileUrl.slice(job.jobDescriptionFileUrl.lastIndexOf('.'))}`;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch (err) {
+      console.error('Failed to open job description file:', err);
+      alert('Failed to open job description file. Please try again.');
+    }
+  };
 
   const submitApplication = async (e) => {
     e.preventDefault();
@@ -138,12 +175,12 @@ const JobList = () => {
                       <p className="text-gray-600">{job.description}</p>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
                       <div className="flex items-start gap-2">
                         <Briefcase className="w-4 h-4 text-gray-400 mt-1" />
                         <div>
                           <p className="text-sm text-gray-500">Job Type</p>
-                          <p className="font-medium text-gray-900">{job.type || 'Full-time'}</p>
+                          <p className="font-medium text-gray-900">{job.type?.replace('_', ' ') || 'Full-time'}</p>
                         </div>
                       </div>
                       <div className="flex items-start gap-2">
@@ -153,12 +190,37 @@ const JobList = () => {
                           <p className="font-medium text-gray-900">{job.location || 'Remote'}</p>
                         </div>
                       </div>
+                      {job.salary && (
+                        <div className="flex items-start gap-2">
+                          <DollarSign className="w-4 h-4 text-gray-400 mt-1" />
+                          <div>
+                            <p className="text-sm text-gray-500">Salary</p>
+                            <p className="font-medium text-gray-900">{job.salary}</p>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex items-start gap-2">
                         <GraduationCap className="w-4 h-4 text-gray-400 mt-1" />
                         <div>
                           <p className="text-sm text-gray-500">Min CGPA</p>
                           <p className="font-medium text-gray-900">{job.minCgpa || 'Not specified'}</p>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Backlog Policy */}
+                    <div className="mb-4">
+                      <p className="text-sm text-gray-500 mb-1">Backlog Policy</p>
+                      <div className="flex items-center gap-2">
+                        {job.allowBacklog ? (
+                          <span className="px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full">
+                            Backlogs Allowed {job.maxBacklog ? `(Max: ${job.maxBacklog})` : '(Unlimited)'}
+                          </span>
+                        ) : (
+                          <span className="px-3 py-1 bg-red-100 text-red-800 text-sm rounded-full">
+                            No Backlogs Allowed
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -178,16 +240,40 @@ const JobList = () => {
                       </div>
                     )}
 
-                    <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+                    <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500 mb-4">
                       <div className="flex items-center gap-1">
                         <Building2 className="w-4 h-4" />
                         <span>{job.company?.companyName || 'Unknown Company'}</span>
                       </div>
+                      {job.company?.website && (
+                        <a 
+                          href={job.company.website.startsWith('http') ? job.company.website : `https://${job.company.website}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-red-600 hover:text-red-700 hover:underline"
+                        >
+                          <Globe className="w-4 h-4" />
+                          <span>Visit Website</span>
+                        </a>
+                      )}
                       <div className="flex items-center gap-1">
                         <Clock className="w-4 h-4" />
                         <span>Posted {new Date(job.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>
+
+                    {/* Job Description File */}
+                    {job.jobDescriptionFileUrl && (
+                      <div className="mb-4">
+                        <button
+                          onClick={() => handleJobDescriptionFile(job)}
+                          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                          <FileText className="w-4 h-4" />
+                          View Job Description File
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-2 md:w-48">
@@ -332,6 +418,51 @@ const JobList = () => {
               </form>
             </div>
           </motion.div>
+        </div>
+      )}
+
+      {/* Job Description File Preview Modal */}
+      {previewJobDesc && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-4xl h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold text-gray-800">{previewJobDesc.name}</h3>
+              <div className="space-x-2">
+                <a
+                  href={previewJobDesc.url}
+                  download={`Job_Description_${previewJobDesc.jobTitle.replace(/\s+/g, '_')}.pdf`}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700"
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </a>
+                <button
+                  onClick={() => setPreviewJobDesc(null)}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 bg-gray-100 rounded-lg relative overflow-hidden">
+              <iframe
+                src={previewJobDesc.url}
+                className="w-full h-full rounded-lg"
+                title="Job Description Preview"
+                onError={(e) => {
+                  console.error('Failed to load PDF preview:', e);
+                  // Fallback to download if preview fails
+                  const a = document.createElement('a');
+                  a.href = previewJobDesc.url;
+                  a.download = `Job_Description_${previewJobDesc.jobTitle.replace(/\s+/g, '_')}.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  setPreviewJobDesc(null);
+                }}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,40 +1,99 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X } from 'lucide-react';
+import { X, Download } from 'lucide-react';
 
 const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
   if (!isOpen) return null;
-  const [form, setForm] = useState({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', allowBacklog: false });
+  const [form, setForm] = useState({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', allowBacklog: false, maxBacklog: '' });
+  const [jobDescriptionFile, setJobDescriptionFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
 
   const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    const { name, value, type, checked, files } = e.target;
+    if (name === 'jobDescriptionFile') {
+      setJobDescriptionFile(files[0] || null);
+    } else {
+      setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    }
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
+
+    // Validate file size (10MB limit)
+    if (jobDescriptionFile && jobDescriptionFile.size > 10 * 1024 * 1024) {
+      setMessage({ type: 'error', text: 'Job description file size must be less than 10MB' });
+      setLoading(false);
+      return;
+    }
+
+    // Validate file type
+    if (jobDescriptionFile) {
+      const allowedTypes = ['.pdf', '.doc', '.docx'];
+      const ext = jobDescriptionFile.name.toLowerCase().slice(jobDescriptionFile.name.lastIndexOf('.'));
+      if (!allowedTypes.includes(ext)) {
+        setMessage({ type: 'error', text: 'Only PDF, DOC, and DOCX files are allowed' });
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
       const token = localStorage.getItem('token');
-      const body = {
-        ...form,
-        requiredSkills: form.requiredSkills.split(',').map(s => s.trim()),
-      };
-      const res = await fetch('http://localhost:5000/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(body)
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Job created successfully' });
-        setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', allowBacklog: false });
-        onCreated && onCreated();
+      
+      // Use FormData if file is present, otherwise use JSON
+      if (jobDescriptionFile) {
+        const formData = new FormData();
+        formData.append('title', form.title);
+        formData.append('description', form.description);
+        formData.append('type', form.type);
+        if (form.location) formData.append('location', form.location);
+        if (form.salary) formData.append('salary', form.salary);
+        if (form.requiredSkills) {
+          const skills = form.requiredSkills.split(',').map(s => s.trim()).filter(s => s);
+          formData.append('requiredSkills', JSON.stringify(skills));
+        }
+        if (form.minCgpa) formData.append('minCgpa', form.minCgpa);
+        formData.append('allowBacklog', form.allowBacklog);
+        if (form.maxBacklog) formData.append('maxBacklog', form.maxBacklog);
+        formData.append('jobDescriptionFile', jobDescriptionFile);
+
+        const res = await fetch('http://localhost:5000/api/jobs', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setMessage({ type: 'success', text: 'Job created successfully' });
+          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', allowBacklog: false, maxBacklog: '' });
+          setJobDescriptionFile(null);
+          onCreated && onCreated();
+        } else {
+          setMessage({ type: 'error', text: data.message || 'Failed to create job' });
+        }
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to create job' });
+        const body = {
+          ...form,
+          requiredSkills: form.requiredSkills ? form.requiredSkills.split(',').map(s => s.trim()).filter(s => s) : [],
+        };
+        const res = await fetch('http://localhost:5000/api/jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setMessage({ type: 'success', text: 'Job created successfully' });
+          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', allowBacklog: false, maxBacklog: '' });
+          setJobDescriptionFile(null);
+          onCreated && onCreated();
+        } else {
+          setMessage({ type: 'error', text: data.message || 'Failed to create job' });
+        }
       }
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
@@ -47,9 +106,10 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden"
+        className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
       >
-        <div className="flex items-center justify-between p-6 border-b">
+        {/* Fixed Header */}
+        <div className="flex items-center justify-between p-6 border-b flex-shrink-0">
           <h3 className="text-2xl font-semibold text-gray-800">Post New Job</h3>
           <button
             onClick={onClose}
@@ -59,14 +119,16 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
           </button>
         </div>
         
-        {message && (
-          <div className={`p-4 ${message.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-            {message.text}
-          </div>
-        )}
-        
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="space-y-4">
+        {/* Scrollable Content Area */}
+        <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
+          {message && (
+            <div className={`p-4 flex-shrink-0 ${message.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+              {message.text}
+            </div>
+          )}
+          
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
               <input
@@ -122,12 +184,12 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Salary</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Salary (LPA)</label>
                 <input
                   name="salary"
                   value={form.salary}
                   onChange={handleChange}
-                  placeholder="e.g. $80,000 - $100,000"
+                  placeholder="e.g. 8 - 12 LPA"
                   className="input"
                 />
               </div>
@@ -160,22 +222,74 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
                 />
               </div>
 
-              <div className="flex items-center">
-                <label className="flex items-center gap-2 cursor-pointer mt-6">
-                  <input
-                    type="checkbox"
-                    name="allowBacklog"
-                    checked={form.allowBacklog}
-                    onChange={handleChange}
-                    className="w-4 h-4 text-[var(--brand-500)] focus:ring-[var(--brand-500)] rounded"
-                  />
-                  <span className="text-sm text-gray-700">Allow Backlog</span>
-                </label>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Backlog Policy</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="allowBacklog"
+                      checked={form.allowBacklog}
+                      onChange={handleChange}
+                      className="w-4 h-4 text-[var(--brand-500)] focus:ring-[var(--brand-500)] rounded"
+                    />
+                    <span className="text-sm text-gray-700">Allow Backlog</span>
+                  </label>
+                  {form.allowBacklog && (
+                    <div className="mt-2">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Maximum Backlogs Allowed</label>
+                      <input
+                        name="maxBacklog"
+                        type="number"
+                        min="0"
+                        value={form.maxBacklog}
+                        onChange={handleChange}
+                        placeholder="e.g. 2"
+                        className="w-full p-2 text-sm border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Job Description File <span className="text-gray-400 text-xs font-normal">(Optional)</span>
+              </label>
+              <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:border-red-500 transition-colors bg-white">
+                <div className="space-y-2 text-center">
+                  <Download className="mx-auto h-12 w-12 text-gray-400" />
+                  <div className="flex text-sm text-gray-600">
+                    <label htmlFor="job-description-upload" className="relative cursor-pointer rounded-md font-medium text-red-600 hover:text-red-500">
+                      <span>Upload a file</span>
+                      <input
+                        id="job-description-upload"
+                        name="jobDescriptionFile"
+                        type="file"
+                        accept=".pdf,.doc,.docx"
+                        onChange={handleChange}
+                        className="sr-only"
+                      />
+                    </label>
+                    <p className="pl-1">or drag and drop</p>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    PDF, DOC, DOCX up to 10MB
+                  </p>
+                  {jobDescriptionFile && (
+                    <p className="text-sm text-green-600">
+                      Selected: {jobDescriptionFile.name}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
             </div>
           </div>
 
-          <div className="flex justify-end items-center gap-3 mt-6 pt-6 border-t">
+          {/* Fixed Footer Buttons */}
+          <div className="flex justify-end items-center gap-3 p-6 pt-4 border-t flex-shrink-0 bg-white">
             <button
               type="button"
               onClick={onClose}
