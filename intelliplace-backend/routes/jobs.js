@@ -5,34 +5,20 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { supabase } from '../lib/supabase.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, '../uploads/cvs');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Multer setup for CV uploads with disk storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    // Create unique filename with student ID and timestamp
-    const uniqueSuffix = `${req.user.id}-${Date.now()}`;
-    cb(null, `cv-${uniqueSuffix}${path.extname(file.originalname)}`);
-  }
-});
+// Use in-memory storage – we'll upload buffer to Supabase
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    // Allow only pdf, doc, docx
     const allowedTypes = ['.pdf', '.doc', '.docx'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowedTypes.includes(ext)) {
@@ -42,7 +28,7 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
+    fileSize: 10 * 1024 * 1024 // 10MB
   }
 });
 
@@ -133,16 +119,38 @@ router.post('/:jobId/apply', authenticateToken, authorizeStudent, upload.single(
     const existing = await prisma.application.findFirst({ where: { studentId, jobId } });
     if (existing) return res.status(400).json({ success: false, message: 'Already applied to this job' });
 
-    // If CV uploaded, save the file path
+    
     let cvUrl = null;
     if (file) {
-      cvUrl = `/uploads/cvs/${file.filename}`;
+      const ext = path.extname(file.originalname).toLowerCase();
+      const filePath = `cvs/${studentId}-${Date.now()}${ext}`; // path inside bucket
+
+      const { error: uploadError } = await supabase.storage
+        .from('Resume')              // bucket name
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error('Supabase upload error:', uploadError);
+        return res.status(500).json({ success: false, message: 'Error uploading CV' });
+      }
+
+      // Get a public URL (if bucket is public)
+      const { data: publicData } = supabase.storage
+        .from('Resume')
+        .getPublicUrl(filePath);
+
+      cvUrl = publicData.publicUrl;
+
       // Update student profile with latest CV URL
       await prisma.student.update({
         where: { id: studentId },
-        data: { cvUrl }
+        data: { cvUrl },
       });
     }
+
 
     // Create application with optional applicant details
     const application = await prisma.application.create({
