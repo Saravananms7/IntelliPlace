@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { FileCheck, Download, Mail, Phone } from 'lucide-react';
+import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [applications, setApplications] = useState([]);
@@ -39,8 +40,8 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [confirming, setConfirming] = useState(false);
 
   const [previewCV, setPreviewCV] = useState(null);
+  const [expandedApp, setExpandedApp] = useState(null);
 
-  
   const downloadCV = (application) => {
     if (!application.cvUrl) {
       alert('No CV available for this applicant');
@@ -64,6 +65,40 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     }
   };
 
+  const exportToExcel = () => {
+    if (applications.length === 0) {
+      alert('No applications to export');
+      return;
+    }
+
+    const exportData = applications.map((app, index) => {
+      const displayCgpa = app.cgpa || app.student.cgpa || 'N/A';
+      const displayBacklog = app.backlog !== null ? app.backlog : (app.student.backlog !== null ? app.student.backlog : 'N/A');
+      
+      return {
+        'S.No': index + 1,
+        'Name': app.student.name || 'N/A',
+        'Roll Number': app.student.rollNumber || 'N/A',
+        'Email': app.student.email || 'N/A',
+        'Phone': app.student.phone || 'N/A',
+        'CGPA': app.cgpa || 'N/A',
+       // 'CGPA (Profile)': app.student.cgpa || 'N/A',
+        'Backlog (Application)': app.backlog !== null ? app.backlog : 'N/A',
+        'Backlog (Profile)': app.student.backlog !== null ? app.student.backlog : 'N/A',
+        //'Status': app.status || 'N/A',
+        'Applied Date': new Date(app.createdAt).toLocaleString(),
+        'CV Available': app.cvUrl ? 'Yes' : 'No',
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Applications');
+
+    const fileName = `Applications_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  };
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
@@ -71,6 +106,16 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
           <div className="flex justify-between items-center gap-4">
             <h2 className="text-2xl font-semibold text-gray-800">Applications</h2>
             <div className="ml-auto flex items-center gap-3">
+              {applications.length > 0 && (
+                <button
+                  onClick={exportToExcel}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                  title="Export to Excel"
+                >
+                  <FileDown className="w-4 h-4" />
+                  Export Excel
+                </button>
+              )}
               {jobStatus === 'OPEN' && !confirming && (
                 <button
                   onClick={() => setConfirming(true)}
@@ -166,104 +211,159 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
               <p className="text-gray-600">No applications yet</p>
             </div>
           ) : (
-            <div className="space-y-6">
-              {applications.map((app) => (
-                <div key={app.id} className="border rounded-lg p-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-800">
-                        {app.student.name}
-                      </h3>
-                      <div className="mt-1 space-y-1">
-                        <p className="text-sm text-gray-600 flex items-center gap-2">
-                          <Mail className="w-4 h-4" />
-                          <a
-                            href={`mailto:${app.student.email}`}
-                            className="hover:text-red-600"
-                          >
-                            {app.student.email}
-                          </a>
-                        </p>
-                        {app.student.phone && (
-                          <p className="text-sm text-gray-600 flex items-center gap-2">
-                            <Phone className="w-4 h-4" />
-                            <a
-                              href={`tel:${app.student.phone}`}
-                              className="hover:text-red-600"
+            <div className="space-y-2">
+              {applications.map((app, index) => {
+                const isExpanded = expandedApp === app.id;
+                const displayCgpa = app.cgpa || app.student.cgpa || 'N/A';
+                const displayBacklog = app.backlog !== null ? app.backlog : (app.student.backlog !== null ? app.student.backlog : 'N/A');
+                
+                return (
+                  <div key={app.id} className="border rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                    <div
+                      onClick={() => setExpandedApp(isExpanded ? null : app.id)}
+                      className="bg-white p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                          <span className="text-red-600 font-semibold text-lg">{index + 1}</span>
+                        </div>
+                        <div className="flex-1 grid grid-cols-2 md:grid-cols-5 gap-4 items-center">
+                          <div className="flex items-center gap-2">
+                            <User className="w-4 h-4 text-gray-400" />
+                            <div>
+                              <p className="font-semibold text-gray-800">{app.student.name}</p>
+                              {app.student.rollNumber && (
+                                <p className="text-xs text-gray-500">Roll: {app.student.rollNumber}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="hidden md:block">
+                            <p className="text-xs text-gray-500">Email</p>
+                            <p className="text-sm text-gray-700 truncate">{app.student.email}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">CGPA</p>
+                            <p className="text-sm font-medium text-gray-800">{displayCgpa}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Backlog</p>
+                            <p className="text-sm font-medium text-gray-800">{displayBacklog}</p>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span
+                              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                                app.status === 'PENDING'
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : app.status === 'REVIEWING'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : app.status === 'SHORTLISTED'
+                                  ? 'bg-green-100 text-green-800'
+                                  : app.status === 'REJECTED'
+                                  ? 'bg-red-100 text-red-800'
+                                  : app.status === 'HIRED'
+                                  ? 'bg-purple-100 text-purple-800'
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}
                             >
-                              {app.student.phone}
-                            </a>
-                          </p>
-                        )}
-                      </div>
-                      <div className="mt-2 grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-sm text-gray-600">CGPA</p>
-                          <div className="flex items-baseline gap-2">
-                            <p className="font-medium text-lg">
-                              {app.cgpa || app.student.cgpa || 'Not provided'}
-                            </p>
-                            {app.cgpa !== app.student.cgpa && app.student.cgpa && (
-                              <span className="text-xs text-gray-500">
-                                (Profile: {app.student.cgpa})
-                              </span>
+                              {app.status}
+                            </span>
+                            {isExpanded ? (
+                              <ChevronUp className="w-5 h-5 text-gray-400" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-gray-400" />
                             )}
                           </div>
                         </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Backlog</p>
-                          <div className="flex items-baseline gap-2">
-                            <p className="font-medium text-lg">
-                              {app.backlog !== null
-                                ? app.backlog
-                                : app.student.backlog !== null
-                                ? app.student.backlog
-                                : 'Not provided'}
-                            </p>
-                            {app.backlog !== app.student.backlog &&
-                              app.student.backlog !== null && (
-                                <span className="text-xs text-gray-500">
-                                  (Profile: {app.student.backlog})
-                                </span>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="border-t bg-gray-50 p-6">
+                        <div className="grid md:grid-cols-2 gap-6">
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3">Contact Information</h4>
+                            <div className="space-y-2">
+                              <p className="text-sm text-gray-600 flex items-center gap-2">
+                                <Mail className="w-4 h-4" />
+                                <a
+                                  href={`mailto:${app.student.email}`}
+                                  className="hover:text-red-600"
+                                >
+                                  {app.student.email}
+                                </a>
+                              </p>
+                              {app.student.phone && (
+                                <p className="text-sm text-gray-600 flex items-center gap-2">
+                                  <Phone className="w-4 h-4" />
+                                  <a
+                                    href={`tel:${app.student.phone}`}
+                                    className="hover:text-red-600"
+                                  >
+                                    {app.student.phone}
+                                  </a>
+                                </p>
                               )}
+                              {app.student.rollNumber && (
+                                <p className="text-sm text-gray-600">
+                                  <span className="font-medium">Roll Number:</span> {app.student.rollNumber}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3">Application Details</h4>
+                            <div className="space-y-2">
+                              <div>
+                                <p className="text-xs text-gray-500">CGPA</p>
+                                <div className="flex items-baseline gap-2">
+                                  <p className="text-sm font-medium text-gray-800">
+                                    {displayCgpa}
+                                  </p>
+                                  {app.cgpa !== app.student.cgpa && app.student.cgpa && (
+                                    <span className="text-xs text-gray-500">
+                                      (Profile: {app.student.cgpa})
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-500">Backlog</p>
+                                <div className="flex items-baseline gap-2">
+                                  <p className="text-sm font-medium text-gray-800">
+                                    {displayBacklog}
+                                  </p>
+                                  {app.backlog !== app.student.backlog &&
+                                    app.student.backlog !== null && (
+                                      <span className="text-xs text-gray-500">
+                                        (Profile: {app.student.backlog})
+                                      </span>
+                                    )}
+                                </div>
+                              </div>
+                              {app.skills && (
+                                <div>
+                                  <p className="text-xs text-gray-500">Skills</p>
+                                  <p className="text-sm text-gray-800">{app.skills}</p>
+                                </div>
+                              )}
+                              <div>
+                                <p className="text-xs text-gray-500">Applied On</p>
+                                <p className="text-sm text-gray-800">
+                                  {new Date(app.createdAt).toLocaleString()}
+                                </p>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="mt-4 pt-4 border-t">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
-                            <div>
-                              <p className="text-sm text-gray-600">Applied</p>
-                              <p className="font-medium">
-                                {new Date(app.createdAt).toLocaleDateString()}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-600">Status</p>
-                              <span
-                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                  app.status === 'PENDING'
-                                    ? 'bg-yellow-100 text-yellow-800'
-                                    : app.status === 'REVIEWING'
-                                    ? 'bg-blue-100 text-blue-800'
-                                    : app.status === 'SHORTLISTED'
-                                    ? 'bg-green-100 text-green-800'
-                                    : app.status === 'REJECTED'
-                                    ? 'bg-red-100 text-red-800'
-                                    : app.status === 'HIRED'
-                                    ? 'bg-purple-100 text-purple-800'
-                                    : 'bg-gray-100 text-gray-800'
-                                }`}
-                              >
-                                {app.status}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-5">
+
+                        <div className="mt-4 pt-4 border-t flex items-center justify-between">
+                          <div className="flex items-center gap-3">
                             <button
-                              onClick={() =>
-                                (window.location.href = `mailto:${app.student.email}`)
-                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.location.href = `mailto:${app.student.email}`;
+                              }}
                               className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
                             >
                               <Mail className="w-4 h-4" />
@@ -271,9 +371,10 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                             </button>
                             {app.student.phone && (
                               <button
-                                onClick={() =>
-                                  (window.location.href = `tel:${app.student.phone}`)
-                                }
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  window.location.href = `tel:${app.student.phone}`;
+                                }}
                                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50"
                               >
                                 <Phone className="w-4 h-4" />
@@ -281,51 +382,27 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                               </button>
                             )}
                           </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              downloadCV(app);
+                            }}
+                            disabled={!app.cvUrl}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${
+                              app.cvUrl
+                                ? 'bg-red-600 text-white hover:bg-red-700'
+                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            }`}
+                          >
+                            <Download className="w-4 h-4" />
+                            {app.cvUrl ? 'View CV' : 'No CV'}
+                          </button>
                         </div>
                       </div>
-                    </div>
-                    <div>
-                      <button
-                        onClick={() => downloadCV(app)}
-                        disabled={!app.cvUrl}
-                        className={`flex items-center gap-2 px-4 py-2 rounded ${
-                          app.cvUrl
-                            ? 'bg-red-600 text-white hover:bg-red-700'
-                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                        }`}
-                      >
-                        <Download className="w-4 h-4" />
-                        {app.cvUrl ? 'View CV' : 'No CV'}
-                      </button>
-                    </div>
+                    )}
                   </div>
-                  <div className="mt-4">
-                    <p className="text-sm text-gray-600">
-                      Applied {new Date(app.createdAt).toLocaleString()}
-                    </p>
-                    <p className="text-sm font-medium text-gray-800 mt-1">
-                      Status:{' '}
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          app.status === 'PENDING'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : app.status === 'REVIEWING'
-                            ? 'bg-blue-100 text-blue-800'
-                            : app.status === 'SHORTLISTED'
-                            ? 'bg-green-100 text-green-800'
-                            : app.status === 'REJECTED'
-                            ? 'bg-red-100 text-red-800'
-                            : app.status === 'HIRED'
-                            ? 'bg-purple-100 text-purple-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
-                        {app.status}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
