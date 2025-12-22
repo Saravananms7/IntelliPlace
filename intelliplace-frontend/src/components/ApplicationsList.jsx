@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles } from 'lucide-react';
+import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
@@ -43,6 +43,51 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [expandedApp, setExpandedApp] = useState(null);
   const [atsLoading, setAtsLoading] = useState(false);
   const [atsProgress, setAtsProgress] = useState(null);
+  const [closeLoading, setCloseLoading] = useState(false);
+  
+  const handleCloseApplication = async () => {
+    if (!window.confirm('Are you sure you want to close applications for this job? This will prevent new applications but will not affect existing applications.')) {
+      return;
+    }
+
+    setCloseLoading(true);
+    setActionMessage(null);
+    
+    try {
+      const res = await fetch(
+        `http://localhost:5000/api/jobs/${jobId}/close`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      
+      const json = await res.json();
+      
+      if (res.ok) {
+        setActionMessage({
+          type: 'success',
+          text: json.message || 'Applications closed successfully',
+        });
+        setJobStatus('CLOSED');
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: json.message || 'Failed to close applications',
+        });
+      }
+    } catch (err) {
+      setActionMessage({ 
+        type: 'error', 
+        text: `Error: ${err.message}` 
+      });
+    } finally {
+      setCloseLoading(false);
+    }
+  };
   
   const downloadCV = (application) => {
     if (!application.cvUrl) {
@@ -191,15 +236,26 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                     Export Excel
                   </button>
                   {jobStatus === 'OPEN' && (
-                    <button
-                      onClick={handleAtsShortlist}
-                      disabled={atsLoading}
-                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Shortlist using AI Resume Analysis"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      {atsLoading ? (atsProgress || 'Processing...') : 'Shortlist using Resume'}
-                    </button>
+                    <>
+                      <button
+                        onClick={handleAtsShortlist}
+                        disabled={atsLoading}
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Shortlist using AI Resume Analysis"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        {atsLoading ? (atsProgress || 'Processing...') : 'Shortlist using Resume'}
+                      </button>
+                      <button
+                        onClick={handleCloseApplication}
+                        disabled={closeLoading || atsLoading}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Close applications manually"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        {closeLoading ? 'Closing...' : 'Close Applications'}
+                      </button>
+                    </>
                   )}
                 </>
               )}

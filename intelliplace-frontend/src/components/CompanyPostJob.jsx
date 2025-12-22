@@ -4,7 +4,7 @@ import { X, Download } from 'lucide-react';
 
 const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
   if (!isOpen) return null;
-  const [form, setForm] = useState({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
+  const [form, setForm] = useState({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', deadline: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
   const [jobDescriptionFile, setJobDescriptionFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
@@ -63,6 +63,7 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         formData.append('type', form.type);
         if (form.location) formData.append('location', form.location);
         if (form.salary) formData.append('salary', form.salary);
+        if (form.deadline) formData.append('deadline', form.deadline);
         if (form.requiredSkills) {
           const skills = form.requiredSkills.split(',').map(s => s.trim()).filter(s => s);
           formData.append('requiredSkills', JSON.stringify(skills));
@@ -81,7 +82,7 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         const data = await res.json();
         if (res.ok) {
           setMessage({ type: 'success', text: 'Job created successfully' });
-          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
+          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', deadline: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
           setJobDescriptionFile(null);
           onCreated && onCreated();
         } else {
@@ -100,7 +101,7 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         const data = await res.json();
         if (res.ok) {
           setMessage({ type: 'success', text: 'Job created successfully' });
-          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
+          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', deadline: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
           setJobDescriptionFile(null);
           onCreated && onCreated();
         } else {
@@ -205,15 +206,28 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Required Skills</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Application Deadline</label>
                 <input
-                  name="requiredSkills"
-                  value={form.requiredSkills}
+                  name="deadline"
+                  type="datetime-local"
+                  value={form.deadline}
                   onChange={handleChange}
-                  placeholder="e.g. React, Node.js, SQL"
+                  min={new Date().toISOString().slice(0, 16)}
                   className="input"
                 />
+                <p className="text-xs text-gray-500 mt-1">Applications will be closed after this date</p>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Required Skills</label>
+              <input
+                name="requiredSkills"
+                value={form.requiredSkills}
+                onChange={handleChange}
+                placeholder="e.g. React, Node.js, SQL"
+                className="input"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">

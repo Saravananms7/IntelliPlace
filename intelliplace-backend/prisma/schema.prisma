@@ -56,6 +56,7 @@ model Job {
   allowBacklog         Boolean?       @map("allow_backlog")
   maxBacklog           Int?           @map("max_backlog")
   jobDescriptionFileUrl String?        @map("job_description_file_url")
+  deadline             DateTime?      @map("deadline")
   companyId            Int            @map("company_id")
   status               String         @default("OPEN")
   createdAt            DateTime       @default(now()) @map("created_at")

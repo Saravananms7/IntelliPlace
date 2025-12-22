@@ -63,7 +63,7 @@ router.post('/', authenticateToken, authorizeCompany, upload.single('jobDescript
     }
     
    
-    let title, description, location, type, salary, requiredSkills, minCgpa, includeCgpaInShortlisting, allowBacklog, maxBacklog;
+    let title, description, location, type, salary, deadline, requiredSkills, minCgpa, includeCgpaInShortlisting, allowBacklog, maxBacklog;
     
     if (req.file) {
   
@@ -72,6 +72,7 @@ router.post('/', authenticateToken, authorizeCompany, upload.single('jobDescript
       location = req.body.location || null;
       type = req.body.type;
       salary = req.body.salary || null;
+      deadline = req.body.deadline || null;
       requiredSkills = req.body.requiredSkills;
       minCgpa = req.body.minCgpa;
       includeCgpaInShortlisting = req.body.includeCgpaInShortlisting;
@@ -79,7 +80,7 @@ router.post('/', authenticateToken, authorizeCompany, upload.single('jobDescript
       maxBacklog = req.body.maxBacklog;
     } else {
       
-      ({ title, description, location, type, salary, requiredSkills, minCgpa, includeCgpaInShortlisting, allowBacklog, maxBacklog } = req.body);
+      ({ title, description, location, type, salary, deadline, requiredSkills, minCgpa, includeCgpaInShortlisting, allowBacklog, maxBacklog } = req.body);
     }
 
     if (!title || !description || !type) return res.status(400).json({ success: false, message: 'Title, description and type are required' });
@@ -134,6 +135,19 @@ router.post('/', authenticateToken, authorizeCompany, upload.single('jobDescript
       }
     }
 
+    // Parse deadline if provided
+    let deadlineDate = null;
+    if (deadline) {
+      deadlineDate = new Date(deadline);
+      if (isNaN(deadlineDate.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid deadline date format' });
+      }
+      // Ensure deadline is in the future
+      if (deadlineDate <= new Date()) {
+        return res.status(400).json({ success: false, message: 'Deadline must be in the future' });
+      }
+    }
+
     const job = await prisma.job.create({
       data: {
         title,
@@ -141,6 +155,7 @@ router.post('/', authenticateToken, authorizeCompany, upload.single('jobDescript
         location: location || null,
         type,
         salary: salary || null,
+        deadline: deadlineDate,
         requiredSkills: parsedSkills ? (Array.isArray(parsedSkills) ? parsedSkills.join(',') : String(parsedSkills)) : null,
         minCgpa: minCgpa ? parseFloat(minCgpa) : null,
         includeCgpaInShortlisting: includeCgpaInShortlisting === 'false' || includeCgpaInShortlisting === false ? false : true,
@@ -208,6 +223,14 @@ router.post('/:jobId/apply', authenticateToken, authorizeStudent, upload.single(
     
     if (job.status !== 'OPEN') {
       return res.status(400).json({ success: false, message: 'Applications for this job are closed' });
+    }
+
+    // Check if deadline has passed
+    if (job.deadline && new Date(job.deadline) < new Date()) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Application deadline has passed. The deadline was ${new Date(job.deadline).toLocaleString()}` 
+      });
     }
 
     
@@ -418,6 +441,36 @@ router.post('/:jobId/shortlist', authenticateToken, authorizeCompany, async (req
   } catch (error) {
     console.error('Error shortlisting applications:', error);
     res.status(500).json({ success: false, message: 'Server error shortlisting applications' });
+  }
+});
+
+// Manual close job applications
+router.post('/:jobId/close', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) {
+      return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+    }
+
+    if (job.status === 'CLOSED') {
+      return res.status(400).json({ success: false, message: 'Job applications are already closed' });
+    }
+
+    await prisma.job.update({
+      where: { id: jobId },
+      data: { status: 'CLOSED' }
+    });
+
+    res.json({ 
+      success: true, 
+      message: 'Job applications closed successfully. New applications are no longer accepted.' 
+    });
+  } catch (error) {
+    console.error('Error closing job applications:', error);
+    res.status(500).json({ success: false, message: 'Server error closing job applications' });
   }
 });
 

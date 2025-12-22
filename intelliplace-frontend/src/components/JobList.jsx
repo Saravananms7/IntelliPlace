@@ -342,6 +342,15 @@ const JobList = () => {
                         <Clock className="w-4 h-4" />
                         <span>Posted {new Date(job.createdAt).toLocaleDateString()}</span>
                       </div>
+                      {job.deadline && (
+                        <div className={`flex items-center gap-1 ${new Date(job.deadline) < new Date() ? 'text-red-600 font-medium' : ''}`}>
+                          <Clock className="w-4 h-4" />
+                          <span>
+                            Deadline: {new Date(job.deadline).toLocaleString()}
+                            {new Date(job.deadline) < new Date() && ' (Passed)'}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Job Description File */}
@@ -365,6 +374,21 @@ const JobList = () => {
                         className="btn bg-green-100 text-green-700 disabled:opacity-60 cursor-not-allowed w-full"
                       >
                         Applied ✓
+                      </button>
+                    ) : job.deadline && new Date(job.deadline) < new Date() ? (
+                      <button
+                        disabled
+                        className="btn bg-gray-100 text-gray-500 disabled:opacity-60 cursor-not-allowed w-full"
+                        title={`Application deadline passed: ${new Date(job.deadline).toLocaleString()}`}
+                      >
+                        Deadline Passed
+                      </button>
+                    ) : job.status !== 'OPEN' ? (
+                      <button
+                        disabled
+                        className="btn bg-gray-100 text-gray-500 disabled:opacity-60 cursor-not-allowed w-full"
+                      >
+                        Applications Closed
                       </button>
                     ) : (
                       <button 
