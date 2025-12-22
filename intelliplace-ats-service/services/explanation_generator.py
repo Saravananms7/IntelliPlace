@@ -40,11 +40,12 @@ class ExplanationGenerator:
         
         # Feature breakdown
         explanation_parts.append("Score Breakdown:")
-        explanation_parts.append(f"  • Semantic Similarity: {feature_scores.semantic_similarity:.2%} (40% weight)")
+        explanation_parts.append(f"  • Job Description Match: {feature_scores.semantic_similarity:.2%} (30% weight)")
+        explanation_parts.append(f"  • Role Alignment: {feature_scores.role_similarity:.2%} (15% weight)")
         explanation_parts.append(f"  • Skill Match: {feature_scores.skill_match_ratio:.2%} (25% weight)")
-        explanation_parts.append(f"  • Experience: {feature_scores.experience_score:.2%} (15% weight)")
+        explanation_parts.append(f"  • Experience: {feature_scores.experience_score:.2%} (12% weight)")
         explanation_parts.append(f"  • Projects/Internships: {feature_scores.project_score:.2%} (10% weight)")
-        explanation_parts.append(f"  • Education Match: {feature_scores.education_match_score:.2%} (10% weight)")
+        explanation_parts.append(f"  • Education Match: {feature_scores.education_match_score:.2%} (8% weight)")
         explanation_parts.append("")
         
         # Resume insights
@@ -75,5 +76,7 @@ class ExplanationGenerator:
             explanation_parts.append("Rationale: Candidate does not meet the minimum scoring threshold for automatic shortlisting.")
         
         return "\n".join(explanation_parts)
+
+
 
 

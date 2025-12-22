@@ -735,6 +735,113 @@ async function extractTextFromCV(cvUrl) {
   }
 }
 
+async function extractTextFromJobDescriptionPDF(jobDescriptionFileUrl) {
+  try {
+    if (!jobDescriptionFileUrl) {
+      console.log(`   [ATS] No job description PDF URL provided`);
+      return null;
+    }
+    
+    console.log(`   [ATS] Extracting text from job description PDF...`);
+    console.log(`   [ATS] Job description PDF URL: ${jobDescriptionFileUrl}`);
+    
+    // Download the job description PDF
+    let buffer = null;
+    
+    // Check if it's a Supabase URL
+    if (jobDescriptionFileUrl.includes('supabase.co') || jobDescriptionFileUrl.includes('supabase')) {
+      try {
+        // Try to extract bucket and file path from URL
+        const urlMatch = jobDescriptionFileUrl.match(/\/storage\/v1\/object\/public\/([^\/]+)\/(.+)/);
+        if (urlMatch) {
+          const bucket = urlMatch[1];
+          const filePath = urlMatch[2];
+          console.log(`   [ATS] Extracted bucket: ${bucket}, file: ${filePath}`);
+          
+          const { data, error } = await supabase.storage.from(bucket).download(filePath);
+          if (error) {
+            console.log(`   [ATS] Supabase SDK download failed: ${error.message}, trying HTTP...`);
+            throw error;
+          }
+          buffer = Buffer.from(await data.arrayBuffer());
+          console.log(`   [ATS] Supabase SDK download successful (${buffer.length} bytes)`);
+        } else {
+          // Try HTTP fallback
+          console.log(`   [ATS] Could not parse Supabase URL, trying HTTP...`);
+          const response = await axios.get(jobDescriptionFileUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            maxRedirects: 5
+          });
+          buffer = Buffer.from(response.data);
+          console.log(`   [ATS] HTTP download successful (${buffer.length} bytes)`);
+        }
+      } catch (supabaseError) {
+        // Fallback to HTTP
+        console.log(`   [ATS] Supabase download failed, trying HTTP fallback...`);
+        try {
+          const response = await axios.get(jobDescriptionFileUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            maxRedirects: 5
+          });
+          buffer = Buffer.from(response.data);
+          console.log(`   [ATS] HTTP fallback successful (${buffer.length} bytes)`);
+        } catch (httpError) {
+          console.error(`   [ATS] HTTP download also failed: ${httpError.message}`);
+          return null;
+        }
+      }
+    } else {
+      // Regular HTTP URL
+      try {
+        const response = await axios.get(jobDescriptionFileUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+          maxRedirects: 5
+        });
+        buffer = Buffer.from(response.data);
+        console.log(`   [ATS] HTTP download successful (${buffer.length} bytes)`);
+      } catch (httpError) {
+        console.error(`   [ATS] HTTP download failed: ${httpError.message}`);
+        return null;
+      }
+    }
+    
+    if (!buffer || buffer.length === 0) {
+      console.log(`   [ATS] Job description PDF download returned empty data`);
+      return null;
+    }
+    
+    // Check if it's a PDF
+    if (!jobDescriptionFileUrl.toLowerCase().endsWith('.pdf')) {
+      console.log(`   [ATS] Job description file is not a PDF, skipping text extraction`);
+      return null;
+    }
+    
+    // Extract text from PDF
+    console.log(`   [ATS] Extracting text from job description PDF (${buffer.length} bytes)...`);
+    const parser = new PDFParse({ data: buffer });
+    const data = await parser.getText();
+    const textLength = data.text ? data.text.trim().length : 0;
+    
+    if (textLength < 10) {
+      console.log(`   [ATS] Extracted text is too short (${textLength} characters)`);
+      return null;
+    }
+    
+    console.log(`   [ATS] Successfully extracted ${textLength} characters from job description PDF`);
+    return data.text;
+    
+  } catch (error) {
+    console.error(`   [ATS] Job description PDF text extraction error: ${error.message}`);
+    if (error.stack) {
+      console.error(`   [ATS] Stack: ${error.stack.substring(0, 500)}`);
+    }
+    return null;
+  }
+}
+
 router.post('/:jobId/shortlist-ats', authenticateToken, authorizeCompany, async (req, res) => {
   try {
     const companyId = req.user.id;
@@ -768,6 +875,20 @@ router.post('/:jobId/shortlist-ats', authenticateToken, authorizeCompany, async 
           ? job.requiredSkills.split(',').map(s => s.trim()).filter(s => s)
           : job.requiredSkills)
       : [];
+
+    // Extract text from job description PDF if available
+    let jobDescriptionPdfText = null;
+    if (job.jobDescriptionFileUrl) {
+      console.log(` [ATS] Job description PDF found, extracting text...`);
+      jobDescriptionPdfText = await extractTextFromJobDescriptionPDF(job.jobDescriptionFileUrl);
+      if (jobDescriptionPdfText) {
+        console.log(` [ATS] Successfully extracted ${jobDescriptionPdfText.length} characters from job description PDF`);
+      } else {
+        console.log(` [ATS] Could not extract text from job description PDF, continuing with text description only`);
+      }
+    } else {
+      console.log(` [ATS] No job description PDF found, using text description only`);
+    }
 
     let processed = 0;
     let shortlisted = 0;
@@ -851,7 +972,9 @@ router.post('/:jobId/shortlist-ats', authenticateToken, authorizeCompany, async 
         console.log(`   [ATS] ${studentName}: Sending to AI service for evaluation...`);
         const atsRequest = {
           resume_text: resumeText,
-          job_description: job.description,
+          job_title: job.title || 'Software Engineer', // Use job title for role matching
+          job_description: job.description || '',
+          job_description_pdf_text: jobDescriptionPdfText || null, // Include PDF text if available
           required_skills: requiredSkills,
           min_experience_years: 0,
           education_requirement: null

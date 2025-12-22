@@ -9,6 +9,7 @@ import math
 
 class FeatureScores(BaseModel):
     semantic_similarity: float
+    role_similarity: float
     skill_match_ratio: float
     experience_score: float
     project_score: float
@@ -23,11 +24,12 @@ class ScoringEngine:
     
     # Weight configuration (must sum to 1.0)
     WEIGHTS = {
-        'semantic_similarity': 0.40,  # 40% - Most important: overall fit
+        'semantic_similarity': 0.30,  # 30% - Overall job description match (includes PDF if available)
+        'role_similarity': 0.15,      # 15% - Job title/role alignment
         'skill_match_ratio': 0.25,    # 25% - Technical skills alignment
-        'experience_score': 0.15,      # 15% - Relevant experience
-        'project_score': 0.10,         # 10% - Project/internship count
-        'education_match_score': 0.10  # 10% - Education level match
+        'experience_score': 0.12,     # 12% - Relevant experience
+        'project_score': 0.10,        # 10% - Project/internship count
+        'education_match_score': 0.08  # 8% - Education level match
     }
     
     def __init__(self):
@@ -171,6 +173,7 @@ class ScoringEngine:
         """
         final_score = (
             self.WEIGHTS['semantic_similarity'] * feature_scores.semantic_similarity +
+            self.WEIGHTS['role_similarity'] * feature_scores.role_similarity +
             self.WEIGHTS['skill_match_ratio'] * feature_scores.skill_match_ratio +
             self.WEIGHTS['experience_score'] * feature_scores.experience_score +
             self.WEIGHTS['project_score'] * feature_scores.project_score +
@@ -179,5 +182,7 @@ class ScoringEngine:
         
         # Ensure score is between 0 and 1
         return max(0.0, min(1.0, final_score))
+
+
 
 

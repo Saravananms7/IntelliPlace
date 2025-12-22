@@ -199,3 +199,5 @@ class ResumeParser:
         return min(count, 10)  # Cap at reasonable maximum
 
 
+
+

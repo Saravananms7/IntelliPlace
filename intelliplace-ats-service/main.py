@@ -19,13 +19,15 @@ from services.explanation_generator import ExplanationGenerator
 app = FastAPI(
     title="IntelliPlace ATS Service",
     description="AI-powered resume evaluation and candidate ranking",
-    version="1.0.0"
+    version="1.0.0" 
 )
 
 
 class ResumeEvaluationRequest(BaseModel):
     resume_text: str = Field(..., description="Full text content of the resume")
+    job_title: str = Field(..., description="Job title/role (e.g., 'Software Engineer', 'Data Scientist')")
     job_description: str = Field(..., description="Complete job description text")
+    job_description_pdf_text: Optional[str] = Field(default=None, description="Text extracted from job description PDF file (if available)")
     required_skills: List[str] = Field(default=[], description="List of required technical skills")
     min_experience_years: Optional[float] = Field(default=0.0, description="Minimum years of experience required")
     education_requirement: Optional[str] = Field(default=None, description="Required education degree (e.g., 'Bachelor', 'Master')")
@@ -33,6 +35,7 @@ class ResumeEvaluationRequest(BaseModel):
 
 class FeatureScores(BaseModel):
     semantic_similarity: float = Field(..., ge=0.0, le=1.0)
+    role_similarity: float = Field(..., ge=0.0, le=1.0)
     skill_match_ratio: float = Field(..., ge=0.0, le=1.0)
     experience_score: float = Field(..., ge=0.0, le=1.0)
     project_score: float = Field(..., ge=0.0, le=1.0)
@@ -85,9 +88,17 @@ async def evaluate_resume(request: ResumeEvaluationRequest):
         parsed_resume = resume_parser.parse(request.resume_text)
         
         # STEP 2: Semantic Matching
+        # Compute similarity with job description (includes PDF text if available)
         semantic_similarity = semantic_matcher.compute_similarity(
             request.resume_text,
-            request.job_description
+            request.job_description,
+            request.job_description_pdf_text
+        )
+        
+        # Compute role/title similarity
+        role_similarity = semantic_matcher.compute_role_similarity(
+            request.resume_text,
+            request.job_title
         )
         
         # STEP 3: Feature Engineering
@@ -114,6 +125,7 @@ async def evaluate_resume(request: ResumeEvaluationRequest):
         # STEP 4: Weighted Scoring
         feature_scores = FeatureScores(
             semantic_similarity=semantic_similarity,
+            role_similarity=role_similarity,
             skill_match_ratio=skill_match_ratio,
             experience_score=experience_score,
             project_score=project_score,

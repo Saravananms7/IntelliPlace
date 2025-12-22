@@ -43,7 +43,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [expandedApp, setExpandedApp] = useState(null);
   const [atsLoading, setAtsLoading] = useState(false);
   const [atsProgress, setAtsProgress] = useState(null);
-
+  
   const downloadCV = (application) => {
     if (!application.cvUrl) {
       alert('No CV available for this applicant');
@@ -376,82 +376,82 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                     {isExpanded && (
                       <div className="border-t bg-gray-50 p-6">
                         <div className="grid md:grid-cols-2 gap-6">
-                          <div>
+                    <div>
                             <h4 className="text-sm font-semibold text-gray-700 mb-3">Contact Information</h4>
                             <div className="space-y-2">
-                              <p className="text-sm text-gray-600 flex items-center gap-2">
-                                <Mail className="w-4 h-4" />
-                                <a
-                                  href={`mailto:${app.student.email}`}
-                                  className="hover:text-red-600"
-                                >
-                                  {app.student.email}
-                                </a>
-                              </p>
-                              {app.student.phone && (
-                                <p className="text-sm text-gray-600 flex items-center gap-2">
-                                  <Phone className="w-4 h-4" />
-                                  <a
-                                    href={`tel:${app.student.phone}`}
-                                    className="hover:text-red-600"
-                                  >
-                                    {app.student.phone}
-                                  </a>
-                                </p>
-                              )}
+                        <p className="text-sm text-gray-600 flex items-center gap-2">
+                          <Mail className="w-4 h-4" />
+                          <a
+                            href={`mailto:${app.student.email}`}
+                            className="hover:text-red-600"
+                          >
+                            {app.student.email}
+                          </a>
+                        </p>
+                        {app.student.phone && (
+                          <p className="text-sm text-gray-600 flex items-center gap-2">
+                            <Phone className="w-4 h-4" />
+                            <a
+                              href={`tel:${app.student.phone}`}
+                              className="hover:text-red-600"
+                            >
+                              {app.student.phone}
+                            </a>
+                          </p>
+                        )}
                               {app.student.rollNumber && (
                                 <p className="text-sm text-gray-600">
                                   <span className="font-medium">Roll Number:</span> {app.student.rollNumber}
                                 </p>
                               )}
                             </div>
-                          </div>
+                      </div>
 
                           <div>
                             <h4 className="text-sm font-semibold text-gray-700 mb-3">Application Details</h4>
                             <div className="space-y-2">
-                              <div>
+                        <div>
                                 <p className="text-xs text-gray-500">CGPA</p>
-                                <div className="flex items-baseline gap-2">
+                          <div className="flex items-baseline gap-2">
                                   <p className="text-sm font-medium text-gray-800">
                                     {displayCgpa}
-                                  </p>
-                                  {app.cgpa !== app.student.cgpa && app.student.cgpa && (
-                                    <span className="text-xs text-gray-500">
-                                      (Profile: {app.student.cgpa})
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              <div>
+                            </p>
+                            {app.cgpa !== app.student.cgpa && app.student.cgpa && (
+                              <span className="text-xs text-gray-500">
+                                (Profile: {app.student.cgpa})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
                                 <p className="text-xs text-gray-500">Backlog</p>
-                                <div className="flex items-baseline gap-2">
+                          <div className="flex items-baseline gap-2">
                                   <p className="text-sm font-medium text-gray-800">
                                     {displayBacklog}
-                                  </p>
-                                  {app.backlog !== app.student.backlog &&
-                                    app.student.backlog !== null && (
-                                      <span className="text-xs text-gray-500">
-                                        (Profile: {app.student.backlog})
-                                      </span>
-                                    )}
-                                </div>
-                              </div>
+                            </p>
+                            {app.backlog !== app.student.backlog &&
+                              app.student.backlog !== null && (
+                                <span className="text-xs text-gray-500">
+                                  (Profile: {app.student.backlog})
+                                </span>
+                              )}
+                          </div>
+                        </div>
                               {app.skills && (
                                 <div>
                                   <p className="text-xs text-gray-500">Skills</p>
                                   <p className="text-sm text-gray-800">{app.skills}</p>
-                                </div>
+                      </div>
                               )}
-                              <div>
+                            <div>
                                 <p className="text-xs text-gray-500">Applied On</p>
                                 <p className="text-sm text-gray-800">
                                   {new Date(app.createdAt).toLocaleString()}
-                                </p>
-                              </div>
+                              </p>
+                            </div>
+                            </div>
                             </div>
                           </div>
-                        </div>
 
                         <div className="mt-4 pt-4 border-t flex items-center justify-between">
                           <div className="flex items-center gap-3">
@@ -478,23 +478,23 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                               </button>
                             )}
                           </div>
-                          <button
+                      <button
                             onClick={(e) => {
                               e.stopPropagation();
                               downloadCV(app);
                             }}
-                            disabled={!app.cvUrl}
+                        disabled={!app.cvUrl}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${
-                              app.cvUrl
-                                ? 'bg-red-600 text-white hover:bg-red-700'
-                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                            }`}
-                          >
-                            <Download className="w-4 h-4" />
-                            {app.cvUrl ? 'View CV' : 'No CV'}
-                          </button>
-                        </div>
-                      </div>
+                          app.cvUrl
+                            ? 'bg-red-600 text-white hover:bg-red-700'
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <Download className="w-4 h-4" />
+                        {app.cvUrl ? 'View CV' : 'No CV'}
+                      </button>
+                    </div>
+                  </div>
                     )}
                   </div>
                 );
