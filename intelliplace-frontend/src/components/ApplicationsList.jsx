@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import Modal from './Modal';
 
 const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [applications, setApplications] = useState([]);
@@ -36,18 +37,17 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
 
   const [actionMessage, setActionMessage] = useState(null);
   const [jobStatus, setJobStatus] = useState(initialJobStatus || 'OPEN');
+  const [modal, setModal] = useState(null);
 
   const [previewCV, setPreviewCV] = useState(null);
   const [expandedApp, setExpandedApp] = useState(null);
   const [atsLoading, setAtsLoading] = useState(false);
   const [atsProgress, setAtsProgress] = useState(null);
   const [closeLoading, setCloseLoading] = useState(false);
+  const [confirmAts, setConfirmAts] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   
   const handleCloseApplication = async () => {
-    if (!window.confirm('Are you sure you want to close applications for this job? This will prevent new applications but will not affect existing applications.')) {
-      return;
-    }
-
     setCloseLoading(true);
     setActionMessage(null);
     
@@ -84,12 +84,13 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       });
     } finally {
       setCloseLoading(false);
+      setConfirmClose(false);
     }
   };
   
   const downloadCV = (application) => {
     if (!application.cvUrl) {
-      alert('No CV available for this applicant');
+      setModal({ title: 'CV not available', text: 'No CV available for this applicant', type: 'error' });
       return;
     }
 
@@ -112,10 +113,9 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
 
   const exportToExcel = () => {
     if (applications.length === 0) {
-      alert('No applications to export');
+      setActionMessage({ type: 'error', text: 'No applications to export' });
       return;
     }
-
     const exportData = applications.map((app, index) => {
       const displayCgpa = app.cgpa || app.student.cgpa || 'N/A';
       const displayBacklog = app.backlog !== null ? app.backlog : (app.student.backlog !== null ? app.student.backlog : 'N/A');
@@ -146,11 +146,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
 
   const handleAtsShortlist = async () => {
     if (applications.length === 0) {
-      alert('No applications to shortlist');
-      return;
-    }
-
-    if (!window.confirm(`This will evaluate all ${applications.length} applications using AI resume analysis. Continue?`)) {
+      setActionMessage({ type: 'error', text: 'No applications to shortlist' });
       return;
     }
 
@@ -235,27 +231,58 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                   </button>
 
                   {/* Shortlisting should be available even after applications are closed — companies may still want to process existing applicants */}
-                  <button
-                    onClick={handleAtsShortlist}
-                    disabled={atsLoading}
-                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Shortlist using AI Resume Analysis"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    {atsLoading ? (atsProgress || 'Processing...') : 'Shortlist using Resume'}
-                  </button>
+                  {!confirmAts ? (
+                    <button
+                      onClick={() => setConfirmAts(true)}
+                      disabled={atsLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Shortlist using AI Resume Analysis"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      {atsLoading ? (atsProgress || 'Processing...') : 'Shortlist using Resume'}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-700">Shortlist all applicants now?</span>
+                      <button
+                        onClick={async () => {
+                          await handleAtsShortlist();
+                          setConfirmAts(false);
+                        }}
+                        className="px-3 py-1 bg-green-600 text-white rounded-md text-sm"
+                        disabled={atsLoading}
+                      >
+                        {atsLoading ? (atsProgress || 'Processing...') : 'Confirm'}
+                      </button>
+                      <button onClick={() => setConfirmAts(false)} className="px-3 py-1 border rounded-md text-sm">Cancel</button>
+                    </div>
+                  )}
 
                   {/* Close applications button only shown when job is open */}
                   {jobStatus === 'OPEN' && (
-                    <button
-                      onClick={handleCloseApplication}
-                      disabled={closeLoading || atsLoading}
-                      className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Close applications manually"
-                    >
-                      <XCircle className="w-4 h-4" />
-                      {closeLoading ? 'Closing...' : 'Close Applications'}
-                    </button>
+                    !confirmClose ? (
+                      <button
+                        onClick={() => setConfirmClose(true)}
+                        disabled={closeLoading || atsLoading}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Close applications manually"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        {closeLoading ? 'Closing...' : 'Close Applications'}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700">Are you sure?</span>
+                        <button
+                          onClick={handleCloseApplication}
+                          className="px-3 py-1 bg-green-600 text-white rounded-md text-sm"
+                          disabled={closeLoading}
+                        >
+                          {closeLoading ? 'Closing...' : 'Confirm'}
+                        </button>
+                        <button onClick={() => setConfirmClose(false)} className="px-3 py-1 border rounded-md text-sm">Cancel</button>
+                      </div>
+                    )
                   )}
                 </>
               )}
@@ -542,6 +569,8 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
           </div>
         </div>
       )}
+
+      <Modal open={!!modal} title={modal?.title} message={modal?.text} type={modal?.type} onClose={() => setModal(null)} actions={[]} />
     </div>
   );
 };

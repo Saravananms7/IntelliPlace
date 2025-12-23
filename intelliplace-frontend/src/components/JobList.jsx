@@ -14,6 +14,7 @@ import {
   Eye
 } from 'lucide-react';
 import { getCurrentUser } from '../utils/auth';
+import Modal from './Modal';
 
 const JobList = () => {
   const [jobs, setJobs] = useState([]);
@@ -21,6 +22,7 @@ const JobList = () => {
   const [selectedJob, setSelectedJob] = useState(null);
   const [applyState, setApplyState] = useState({ cgpa: '', backlog: '', cv: null });
   const [message, setMessage] = useState(null);
+  const [modal, setModal] = useState(null);
   const [appliedJobs, setAppliedJobs] = useState(new Set());
   const [previewJobDesc, setPreviewJobDesc] = useState(null);
   const [eligibilityError, setEligibilityError] = useState(null);
@@ -132,7 +134,7 @@ const JobList = () => {
 
   const handleJobDescriptionFile = async (job) => {
     if (!job.jobDescriptionFileUrl) {
-      alert('No job description file available');
+      setModal({ title: 'Job Description not available', text: 'No job description file available', type: 'error' });
       return;
     }
 
@@ -158,7 +160,7 @@ const JobList = () => {
       }
     } catch (err) {
       console.error('Failed to open job description file:', err);
-      alert('Failed to open job description file. Please try again.');
+      setModal({ title: 'Job Description error', text: 'Failed to open job description file. Please try again.', type: 'error' });
     }
   };
 
@@ -242,6 +244,9 @@ const JobList = () => {
                   isApplied ? 'border-green-500 bg-green-50/30' : 'hover:shadow-md'
                 }`}
               >
+                {/* Modal for critical job-related errors */}
+                <Modal open={!!modal} title={modal?.title} message={modal?.text} type={modal?.type} onClose={() => setModal(null)} actions={[]} />
+            
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
                   <div className="flex-grow">
                     <div className="flex items-center gap-3 mb-3">
@@ -636,6 +641,8 @@ const JobList = () => {
           </div>
         </div>
       )}
+
+      <Modal open={!!modal} title={modal?.title} message={modal?.text} type={modal?.type} onClose={() => setModal(null)} actions={[]} />
     </div>
   );
 };

@@ -32,6 +32,9 @@ const { PDFParse } = require('pdf-parse');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Directory where uploaded CVs are stored (relative to repository): intelliplace-backend/uploads/cvs
+const uploadsDir = path.join(__dirname, '..', 'uploads', 'cvs');
+
 const router = express.Router();
 
 const storage = multer.memoryStorage();
@@ -518,42 +521,57 @@ router.get('/cv/:filename', authenticateToken, async (req, res) => {
   try {
     const { filename } = req.params;
     const filePath = path.join(uploadsDir, filename);
-    
-  
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ success: false, message: 'CV file not found' });
+
+    // If it's available on disk, serve directly
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(filename).toLowerCase();
+      const contentType = ext === '.pdf' ? 'application/pdf' :
+                         ext === '.doc' ? 'application/msword' :
+                         ext === '.docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
+                         'application/octet-stream';
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `inline; filename=${filename}`);
+      return res.sendFile(filePath);
     }
 
-    
-    const cvPath = `/uploads/cvs/${filename}`;
+    // Not present locally — try to find an application that references this filename (either local or remote URL)
     const application = await prisma.application.findFirst({
       where: {
-        OR: [
-          { cvUrl: cvPath },
-          { student: { cvUrl: cvPath } }
+        AND: [
+          {
+            OR: [
+              { cvUrl: `/uploads/cvs/${filename}` },
+              { cvUrl: { endsWith: filename } },
+              { student: { cvUrl: { endsWith: filename } } },
+            ],
+          },
+          {
+            OR: [
+              { studentId: req.user.id },
+              { job: { companyId: req.user.id } },
+            ],
+          },
         ],
-        OR: [
-          { studentId: req.user.id }, 
-          { job: { companyId: req.user.id } } 
-        ]
-      }
+      },
+      include: { student: true },
     });
 
     if (!application) {
-      return res.status(403).json({ success: false, message: 'Access denied' });
+      return res.status(404).json({ success: false, message: 'CV not found or access denied' });
     }
 
-  
-    const ext = path.extname(filename).toLowerCase();
-    const contentType = ext === '.pdf' ? 'application/pdf' :
-                       ext === '.doc' ? 'application/msword' :
-                       ext === '.docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
-                       'application/octet-stream';
-    
-    
+    const actualUrl = application.cvUrl || application.student?.cvUrl;
+    if (!actualUrl || !actualUrl.startsWith('http')) {
+      return res.status(404).json({ success: false, message: 'CV file not found' });
+    }
+
+    // Proxy the remote file stream to the client so the frontend can render it as if it were local
+    const response = await axios.get(actualUrl, { responseType: 'stream', timeout: 30000 });
+    const contentType = response.headers['content-type'] || 'application/octet-stream';
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `inline; filename=${filename}`);
-    res.sendFile(filePath);
+    response.data.pipe(res);
   } catch (error) {
     console.error('Error serving CV:', error);
     res.status(500).json({ success: false, message: 'Server error serving CV' });

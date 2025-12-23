@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Navbar from '../../components/Navbar';
 import CvPreviewModal from '../../components/CvPreviewModal';
+import Modal from '../../components/Modal';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentUser } from '../../utils/auth';
 
@@ -10,6 +11,8 @@ const MyApplications = () => {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -45,7 +48,7 @@ const MyApplications = () => {
       });
       if (!res.ok) {
         const json = await res.json();
-        alert(json.message || 'Failed to fetch CV');
+        setModal({ title: 'Failed to fetch CV', text: json.message || 'Failed to fetch CV', type: 'error' });
         return;
       }
       const blob = await res.blob();
@@ -53,7 +56,7 @@ const MyApplications = () => {
       setPreview({ url, name: filename });
     } catch (err) {
       console.error('Error fetching CV', err);
-      alert('Failed to open CV');
+      setModal({ title: 'Failed to open CV', text: 'Failed to open CV', type: 'error' });
     }
   };
 
@@ -64,6 +67,13 @@ const MyApplications = () => {
       <Navbar />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <h1 className="text-2xl font-bold mb-4">My Applications</h1>
+
+        {notice && (
+          <div className={`p-3 mb-4 rounded ${notice.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+            {notice.text}
+            <button onClick={() => setNotice(null)} className="ml-4 underline text-sm">Dismiss</button>
+          </div>
+        )} 
 
         {loading ? (
           <div className="py-8 text-center">Loading...</div>
@@ -137,6 +147,15 @@ const MyApplications = () => {
           if (preview?.url) window.URL.revokeObjectURL(preview.url);
           setPreview(null);
         }}
+      />
+
+      <Modal
+        open={!!modal}
+        title={modal?.title}
+        message={modal?.text}
+        type={modal?.type}
+        onClose={() => setModal(null)}
+        actions={[]}
       />
     </div>
   );

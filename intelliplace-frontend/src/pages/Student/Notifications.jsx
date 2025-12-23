@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import CvPreviewModal from '../../components/CvPreviewModal';
+import Modal from '../../components/Modal';
 import { getCurrentUser } from '../../utils/auth';
 
 const Notifications = () => {
@@ -11,6 +12,8 @@ const Notifications = () => {
   const [loading, setLoading] = useState(false);
   const [reasons, setReasons] = useState({});
   const [preview, setPreview] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -80,7 +83,7 @@ const Notifications = () => {
       });
       if (!res.ok) {
         const json = await res.json();
-        alert(json.message || 'Failed to fetch CV');
+        setModal({ title: 'Failed to fetch CV', text: json.message || 'Failed to fetch CV', type: 'error' });
         return;
       }
       const blob = await res.blob();
@@ -88,7 +91,7 @@ const Notifications = () => {
       setPreview({ url, name: filename });
     } catch (err) {
       console.error('Failed to fetch CV for preview', err);
-      alert('Failed to fetch CV');
+      setModal({ title: 'Failed to fetch CV', text: 'Failed to fetch CV', type: 'error' });
     }
   };
 
@@ -101,6 +104,14 @@ const Notifications = () => {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">Notifications</h1>
           <div>
+
+        {notice && (
+          <div className={`p-3 mb-4 rounded ${notice.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+            {notice.text}
+            <button onClick={() => setNotice(null)} className="ml-4 underline text-sm">Dismiss</button>
+          </div>
+        )}
+
             <button
               onClick={async () => {
                 if (!notifications || notifications.length === 0) return;
@@ -193,6 +204,8 @@ const Notifications = () => {
           </div>
         )}
       <CvPreviewModal preview={preview} onClose={() => setPreview(null)} />
+
+      <Modal open={!!modal} title={modal?.title} message={modal?.text} type={modal?.type} onClose={() => setModal(null)} actions={[]} />
       </div>
     </div>
   );
