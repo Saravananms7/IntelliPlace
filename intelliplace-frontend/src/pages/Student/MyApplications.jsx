@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import Navbar from '../../components/Navbar';
 import CvPreviewModal from '../../components/CvPreviewModal';
 import Modal from '../../components/Modal';
+import StudentTakeTest from '../../components/StudentTakeTest';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentUser } from '../../utils/auth';
+import { Play } from 'lucide-react';
 
 const MyApplications = () => {
   const navigate = useNavigate();
@@ -13,6 +15,9 @@ const MyApplications = () => {
   const [preview, setPreview] = useState(null);
   const [modal, setModal] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [isTestOpen, setIsTestOpen] = useState(false);
+  const [testJobId, setTestJobId] = useState(null);
+  const [testStatuses, setTestStatuses] = useState({}); // jobId -> test status
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -28,7 +33,33 @@ const MyApplications = () => {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
         });
         const json = await res.json();
-        if (res.ok) setApplications(json.data.applications || []);
+        if (res.ok) {
+          const apps = json.data.applications || [];
+          setApplications(apps);
+          
+          // Fetch test status for each job that has SHORTLISTED applications
+          const shortlistedJobs = apps
+            .filter(app => app.status === 'SHORTLISTED')
+            .map(app => app.jobId);
+          
+          const testStatusMap = {};
+          for (const jobId of shortlistedJobs) {
+            try {
+              const testRes = await fetch(`http://localhost:5000/api/jobs/${jobId}/aptitude-test/status`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+              });
+              if (testRes.ok) {
+                const testJson = await testRes.json();
+                if (testJson.data?.test?.status) {
+                  testStatusMap[jobId] = testJson.data.test.status;
+                }
+              }
+            } catch (err) {
+              console.error(`Error fetching test status for job ${jobId}:`, err);
+            }
+          }
+          setTestStatuses(testStatusMap);
+        }
       } catch (err) {
         console.error(err);
       } finally { setLoading(false); }
@@ -101,6 +132,8 @@ const MyApplications = () => {
 
                   <div>
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-sm font-medium ${
+                      app.status === 'PASSED APTITUDE' ? 'bg-green-100 text-green-800 border border-green-200' :
+                      app.status === 'FAILED APTITUDE' ? 'bg-red-100 text-red-800 border border-red-200' :
                       app.status && app.status.toLowerCase().includes('reject') ? 'bg-red-100 text-red-800 border border-red-200' :
                       app.status && (app.status.toLowerCase().includes('shortlist') || app.status.toLowerCase().includes('hire') || app.status.toLowerCase().includes('accept')) ? 'bg-green-100 text-green-800 border border-green-200' :
                       'bg-gray-100 text-gray-800'
@@ -135,12 +168,16 @@ const MyApplications = () => {
                     Open Job
                   </button>
 
-                  {app.status === 'SHORTLISTED' && (
+                  {app.status === 'SHORTLISTED' && testStatuses[app.jobId] === 'STARTED' && (
                     <button
-                      onClick={() => navigate(`/student/take-test/${app.jobId}`)}
-                      className="px-3 py-1 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700"
+                      onClick={() => {
+                        setTestJobId(app.jobId);
+                        setIsTestOpen(true);
+                      }}
+                      className="flex items-center gap-2 px-3 py-1 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
                     >
-                      Take Test
+                      <Play className="w-4 h-4" />
+                      Start Test
                     </button>
                   )}
                 </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle } from 'lucide-react';
+import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle, Play } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Modal from './Modal';
 
@@ -7,6 +7,8 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [aptitudeTest, setAptitudeTest] = useState(null);
+  const [testLoading, setTestLoading] = useState(false);
 
   // Fetch applications for a job
   const fetchApplications = async () => {
@@ -20,7 +22,23 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       });
       const json = await res.json();
       if (res.ok) {
-        setApplications(json.data.applications || []);
+        const apps = json.data.applications || [];
+        // Sort applications by status priority
+        const statusPriority = {
+          'PASSED APTITUDE': 1,
+          'SHORTLISTED': 2,
+          'PENDING': 3,
+          'REVIEWING': 4,
+          'FAILED APTITUDE': 5,
+          'REJECTED': 6,
+          'HIRED': 7,
+        };
+        const sortedApps = apps.sort((a, b) => {
+          const priorityA = statusPriority[a.status] || 99;
+          const priorityB = statusPriority[b.status] || 99;
+          return priorityA - priorityB;
+        });
+        setApplications(sortedApps);
       } else {
         setError(json.message || 'Failed to fetch applications');
       }
@@ -31,9 +49,6 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     }
   };
 
-  useEffect(() => {
-    if (jobId) fetchApplications();
-  }, [jobId]);
 
   const [actionMessage, setActionMessage] = useState(null);
   const [jobStatus, setJobStatus] = useState(initialJobStatus || 'OPEN');
@@ -46,6 +61,36 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [closeLoading, setCloseLoading] = useState(false);
   const [confirmAts, setConfirmAts] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [confirmStartTest, setConfirmStartTest] = useState(false);
+  
+  // Fetch aptitude test info
+  const fetchAptitudeTest = async () => {
+    if (!jobId) return;
+    try {
+      const res = await fetch(`http://localhost:5000/api/jobs/${jobId}/aptitude-test`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        setAptitudeTest(json.data?.test || null);
+      } else {
+        // Test doesn't exist yet, that's okay
+        setAptitudeTest(null);
+      }
+    } catch (err) {
+      console.error('Error fetching aptitude test:', err);
+      setAptitudeTest(null);
+    }
+  };
+
+  useEffect(() => {
+    if (jobId) {
+      fetchApplications();
+      fetchAptitudeTest();
+    }
+  }, [jobId]);
   
   const handleCloseApplication = async () => {
     setCloseLoading(true);
@@ -116,7 +161,25 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       setActionMessage({ type: 'error', text: 'No applications to export' });
       return;
     }
-    const exportData = applications.map((app, index) => {
+    
+    // Sort applications by status priority
+    const statusPriority = {
+      'PASSED APTITUDE': 1,
+      'SHORTLISTED': 2,
+      'PENDING': 3,
+      'REVIEWING': 4,
+      'FAILED APTITUDE': 5,
+      'REJECTED': 6,
+      'HIRED': 7,
+    };
+    
+    const sortedApplications = [...applications].sort((a, b) => {
+      const priorityA = statusPriority[a.status] || 99;
+      const priorityB = statusPriority[b.status] || 99;
+      return priorityA - priorityB;
+    });
+    
+    const exportData = sortedApplications.map((app, index) => {
       const displayCgpa = app.cgpa || app.student.cgpa || 'N/A';
       const displayBacklog = app.backlog !== null ? app.backlog : (app.student.backlog !== null ? app.student.backlog : 'N/A');
       
@@ -127,14 +190,13 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
         'Email': app.student.email || 'N/A',
         'Phone': app.student.phone || 'N/A',
         'CGPA': app.cgpa || 'N/A',
-       // 'CGPA (Profile)': app.student.cgpa || 'N/A',
-         'Backlog (Application)': app.backlog !== null ? app.backlog : 'N/A',
-         'Backlog (Profile)': app.student.backlog !== null ? app.student.backlog : 'N/A',
-         //'Status': app.status || 'N/A',
-         'Applied Date': new Date(app.createdAt).toLocaleString(),
-         'CV Available': app.cvUrl ? 'Yes' : 'No',
-       };
-     });
+        'Backlog (Application)': app.backlog !== null ? app.backlog : 'N/A',
+        'Backlog (Profile)': app.student.backlog !== null ? app.student.backlog : 'N/A',
+        'Status': app.status || 'N/A',
+        'Applied Date': new Date(app.createdAt).toLocaleString(),
+        'CV Available': app.cvUrl ? 'Yes' : 'No',
+      };
+    });
 
      const worksheet = XLSX.utils.json_to_sheet(exportData);
      const workbook = XLSX.utils.book_new();
@@ -212,6 +274,48 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     }
   };
 
+  const handleStartTest = async () => {
+    setTestLoading(true);
+    setActionMessage(null);
+    
+    try {
+      const res = await fetch(
+        `http://localhost:5000/api/jobs/${jobId}/aptitude-test/start`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      
+      const json = await res.json();
+      
+      if (res.ok) {
+        const invitedCount = json.data?.invited || 0;
+        setActionMessage({
+          type: 'success',
+          text: `Aptitude test started successfully! Notifications sent to ${invitedCount} shortlisted student(s).`,
+        });
+        await fetchAptitudeTest(); // Refresh test status
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: json.message || 'Failed to start aptitude test',
+        });
+      }
+    } catch (err) {
+      setActionMessage({ 
+        type: 'error', 
+        text: `Error: ${err.message}` 
+      });
+    } finally {
+      setTestLoading(false);
+      setConfirmStartTest(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
@@ -283,6 +387,41 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                         <button onClick={() => setConfirmClose(false)} className="px-3 py-1 border rounded-md text-sm">Cancel</button>
                       </div>
                     )
+                  )}
+
+                  {/* Start Test button only shown when job is CLOSED and test exists and is not STARTED */}
+                  {jobStatus === 'CLOSED' && aptitudeTest && aptitudeTest.status !== 'STARTED' && (
+                    !confirmStartTest ? (
+                      <button
+                        onClick={() => setConfirmStartTest(true)}
+                        disabled={testLoading || atsLoading}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Start aptitude test for shortlisted students"
+                      >
+                        <Play className="w-4 h-4" />
+                        {testLoading ? 'Starting...' : 'Start Test'}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700">Start test for shortlisted students?</span>
+                        <button
+                          onClick={handleStartTest}
+                          className="px-3 py-1 bg-green-600 text-white rounded-md text-sm"
+                          disabled={testLoading}
+                        >
+                          {testLoading ? 'Starting...' : 'Confirm'}
+                        </button>
+                        <button onClick={() => setConfirmStartTest(false)} className="px-3 py-1 border rounded-md text-sm">Cancel</button>
+                      </div>
+                    )
+                  )}
+
+                  {/* Show test status if already started */}
+                  {aptitudeTest && aptitudeTest.status === 'STARTED' && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-green-100 text-green-800 rounded-lg text-sm font-medium">
+                      <Play className="w-4 h-4" />
+                      Test Started
+                    </div>
                   )}
                 </>
               )}
@@ -372,7 +511,11 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                           <div className="flex items-center justify-between">
                             <span
                               className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                                app.status === 'PENDING'
+                                app.status === 'PASSED APTITUDE'
+                                  ? 'bg-green-100 text-green-800 border border-green-200'
+                                  : app.status === 'FAILED APTITUDE'
+                                  ? 'bg-red-100 text-red-800 border border-red-200'
+                                  : app.status === 'PENDING'
                                   ? 'bg-yellow-100 text-yellow-800'
                                   : app.status === 'REVIEWING'
                                   ? 'bg-blue-100 text-blue-800'

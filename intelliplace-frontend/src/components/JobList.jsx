@@ -24,6 +24,7 @@ const JobList = () => {
   const [message, setMessage] = useState(null);
   const [modal, setModal] = useState(null);
   const [appliedJobs, setAppliedJobs] = useState(new Set());
+  const [applicationStatuses, setApplicationStatuses] = useState({}); // jobId -> status
   const [previewJobDesc, setPreviewJobDesc] = useState(null);
   const [eligibilityError, setEligibilityError] = useState(null);
 
@@ -42,8 +43,16 @@ const JobList = () => {
 
       if (applicationsRes.ok) {
         const appJson = await applicationsRes.json();
-        const appliedIds = new Set((appJson.data?.applications || []).map(app => app.jobId));
+        const applications = appJson.data?.applications || [];
+        const appliedIds = new Set(applications.map(app => app.jobId));
         setAppliedJobs(appliedIds);
+        
+        // Create a map of jobId -> status
+        const statusMap = {};
+        applications.forEach(app => {
+          statusMap[app.jobId] = app.status;
+        });
+        setApplicationStatuses(statusMap);
       }
     } catch (err) {
       console.error(err);
@@ -249,9 +258,30 @@ const JobList = () => {
             
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
                   <div className="flex-grow">
-                    <div className="flex items-center gap-3 mb-3">
+                    <div className="flex items-center gap-3 mb-3 flex-wrap">
                       <h3 className="text-xl font-semibold text-gray-900">{job.title}</h3>
-                      {isApplied && (
+                      {isApplied && applicationStatuses[job.id] && (
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                          applicationStatuses[job.id] === 'PASSED APTITUDE' 
+                            ? 'bg-green-100 text-green-800 border border-green-200' 
+                            : applicationStatuses[job.id] === 'FAILED APTITUDE'
+                            ? 'bg-red-100 text-red-800 border border-red-200'
+                            : applicationStatuses[job.id] === 'SHORTLISTED'
+                            ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                            : applicationStatuses[job.id] === 'REJECTED'
+                            ? 'bg-red-100 text-red-800 border border-red-200'
+                            : applicationStatuses[job.id] === 'PENDING'
+                            ? 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+                            : applicationStatuses[job.id] === 'REVIEWING'
+                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                            : applicationStatuses[job.id] === 'HIRED'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-gray-100 text-gray-800 border border-gray-200'
+                        }`}>
+                          {applicationStatuses[job.id]}
+                        </span>
+                      )}
+                      {isApplied && !applicationStatuses[job.id] && (
                         <span className="px-2.5 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
                           Applied
                         </span>

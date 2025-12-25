@@ -652,6 +652,32 @@ router.post('/:jobId/aptitude-test/start', authenticateToken, authorizeCompany, 
   }
 });
 
+// Stop aptitude test for a job
+router.post('/:jobId/aptitude-test/stop', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+
+    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
+    if (!test) return res.status(404).json({ success: false, message: 'No aptitude test found for this job' });
+
+    if (test.status !== 'STARTED') return res.status(400).json({ success: false, message: 'Test is not currently started' });
+
+    const updated = await prisma.aptitudeTest.update({ 
+      where: { id: test.id }, 
+      data: { status: 'STOPPED' } 
+    });
+
+    res.json({ success: true, message: 'Aptitude test stopped', data: { test: updated } });
+  } catch (error) {
+    console.error('Error stopping aptitude test:', error);
+    res.status(500).json({ success: false, message: 'Server error stopping aptitude test' });
+  }
+});
+
 // Company: manage questions for a job's aptitude test
 router.post('/:jobId/aptitude-test/questions', authenticateToken, authorizeCompany, async (req, res) => {
   try {
@@ -730,6 +756,29 @@ router.delete('/:jobId/aptitude-test/questions/:qId', authenticateToken, authori
   }
 });
 
+// Student: check test status (to see if test is available)
+router.get('/:jobId/aptitude-test/status', authenticateToken, authorizeStudent, async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+
+    const application = await prisma.application.findFirst({ where: { jobId, studentId } });
+    if (!application || application.status !== 'SHORTLISTED') {
+      return res.json({ success: true, data: { test: null, eligible: false } });
+    }
+
+    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
+    if (!test) {
+      return res.json({ success: true, data: { test: null, eligible: true } });
+    }
+
+    res.json({ success: true, data: { test: { id: test.id, status: test.status, startedAt: test.startedAt }, eligible: true } });
+  } catch (error) {
+    console.error('Error fetching test status:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching test status' });
+  }
+});
+
 // Student: fetch public questions (only allowed once test is STARTED)
 router.get('/:jobId/aptitude-test/questions/public', authenticateToken, authorizeStudent, async (req, res) => {
   try {
@@ -785,13 +834,27 @@ router.post('/:jobId/aptitude-test/submit', authenticateToken, authorizeStudent,
 
     let score = 0;
     for (const ans of answers) {
-      if (!ans || typeof ans.questionId !== 'number' || typeof ans.selectedIndex !== 'number') continue;
+      if (!ans || typeof ans.questionId !== 'number') continue;
+      // Allow selectedIndex to be 0 (first option) - check if it's a number or explicitly -1 for unanswered
+      if (typeof ans.selectedIndex !== 'number' || ans.selectedIndex < 0) continue;
       const q = qMap[ans.questionId];
       if (!q) continue;
       if (ans.selectedIndex === q.correctIndex) score += q.marks || 1;
     }
 
-    const passed = typeof test.cutoff === 'number' ? (score >= test.cutoff) : true;
+    // Cutoff is stored as percentage (0-100), convert to points for comparison
+    let cutoffInPoints = null;
+    if (typeof test.cutoff === 'number' && maxScore > 0) {
+      // If cutoff is between 0-100, treat it as percentage
+      if (test.cutoff >= 0 && test.cutoff <= 100) {
+        cutoffInPoints = Math.ceil((test.cutoff / 100) * maxScore);
+      } else {
+        // If cutoff > 100, treat it as absolute points
+        cutoffInPoints = test.cutoff;
+      }
+    }
+    
+    const passed = cutoffInPoints !== null ? (score >= cutoffInPoints) : true;
 
     const submission = await prisma.aptitudeSubmission.create({
       data: {
@@ -804,17 +867,17 @@ router.post('/:jobId/aptitude-test/submit', authenticateToken, authorizeStudent,
       }
     });
 
-    // Update application status & notify student if failed
+    // Update application status & notify student
     const job = await prisma.job.findUnique({ where: { id: jobId } });
     if (!passed) {
       const decisionReason = `Failed aptitude test (score ${score}/${maxScore})`;
-      await prisma.application.update({ where: { id: application.id }, data: { status: 'REJECTED', decisionReason } });
+      await prisma.application.update({ where: { id: application.id }, data: { status: 'FAILED APTITUDE', decisionReason } });
 
       await prisma.notification.create({
         data: {
           studentId,
           title: `Aptitude Test Result: ${job?.title || ''}`,
-          message: `You scored ${score}/${maxScore} on the aptitude test. You have not met the cutoff and your application has been rejected.`,
+          message: `You scored ${score}/${maxScore} on the aptitude test. You have not met the cutoff and your application status is now FAILED APTITUDE.`,
           jobId,
           applicationId: application.id,
           decisionReason
@@ -822,11 +885,13 @@ router.post('/:jobId/aptitude-test/submit', authenticateToken, authorizeStudent,
       });
     } else {
       const decisionReason = `Passed aptitude test (score ${score}/${maxScore})`;
+      await prisma.application.update({ where: { id: application.id }, data: { status: 'PASSED APTITUDE', decisionReason } });
+
       await prisma.notification.create({
         data: {
           studentId,
           title: `Aptitude Test Result: ${job?.title || ''}`,
-          message: `You scored ${score}/${maxScore} on the aptitude test. You have passed and remain shortlisted.`,
+          message: `You scored ${score}/${maxScore} on the aptitude test. You have passed! Your application status is now PASSED APTITUDE.`,
           jobId,
           applicationId: application.id,
           decisionReason

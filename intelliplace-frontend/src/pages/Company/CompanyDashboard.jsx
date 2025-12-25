@@ -73,6 +73,9 @@ const CompanyDashboard = () => {
   const [isStartConfirmOpen, setIsStartConfirmOpen] = useState(false);
   const [startingJob, setStartingJob] = useState(null);
   const [startLoading, setStartLoading] = useState(false);
+  const [isStopConfirmOpen, setIsStopConfirmOpen] = useState(false);
+  const [stoppingJob, setStoppingJob] = useState(null);
+  const [stopLoading, setStopLoading] = useState(false);
   const [lastFetch, setLastFetch] = useState(0); // Track last fetch time
 
   const fetchJobs = async (userId) => {
@@ -149,6 +152,29 @@ const CompanyDashboard = () => {
       alert('Failed to start test');
     } finally {
       setStartLoading(false);
+    }
+  };
+
+  const handleConfirmStop = async () => {
+    if (!stoppingJob) return;
+    setStopLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`http://localhost:5000/api/jobs/${stoppingJob.id}/aptitude-test/stop`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const d = await res.json();
+      if (!res.ok) {
+        alert(d.message || 'Failed to stop test');
+      } else {
+        setTestsMap(prev => ({ ...prev, [stoppingJob.id]: d.data.test }));
+        alert('Test stopped successfully');
+        setIsStopConfirmOpen(false);
+        setStoppingJob(null);
+      }
+    } catch (err) {
+      console.error('Failed to stop test:', err);
+      alert('Failed to stop test');
+    } finally {
+      setStopLoading(false);
     }
   };
 
@@ -288,6 +314,18 @@ const CompanyDashboard = () => {
           ]}
         />
 
+        <Modal
+          open={isStopConfirmOpen}
+          title={`Stop test for ${stoppingJob?.title || ''}`}
+          message={`Stopping the test will prevent students from taking the test. Students who have already submitted will keep their results. Continue?`}
+          type="warning"
+          onClose={() => setIsStopConfirmOpen(false)}
+          actions={[
+            { label: 'Cancel', onClick: () => setIsStopConfirmOpen(false) },
+            { label: stopLoading ? 'Stopping...' : 'Stop Test', onClick: handleConfirmStop, autoClose: false }
+          ]}
+        />
+
         {/* Recent Jobs */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -397,43 +435,35 @@ const CompanyDashboard = () => {
                       <div className="flex items-center gap-2">
                         {testsMap[job.id] ? (
                           <>
-                            <button
-                              onClick={() => { setIsStartConfirmOpen(true); setStartingJob(job); }}
-                              disabled={testsMap[job.id]?.status === 'STARTED'}
-                              className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50"
-                            >
-                              Start Test
-                            </button>
+                            {/* Show Start Test button only if test is CREATED (not STARTED or STOPPED) */}
+                            {testsMap[job.id]?.status === 'CREATED' && (
+                              <button
+                                onClick={() => { setIsStartConfirmOpen(true); setStartingJob(job); }}
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                              >
+                                Start Test
+                              </button>
+                            )}
 
-                            <button
-                              onClick={() => { setIsViewTestOpen(true); setViewTestJobId(job.id); }}
-                              className="inline-flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm"
-                            >
-                              View Test
-                            </button>
+                            {/* Show Stop Test button only if test is STARTED */}
+                            {testsMap[job.id]?.status === 'STARTED' && (
+                              <button
+                                onClick={() => { setIsStopConfirmOpen(true); setStoppingJob(job); }}
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                              >
+                                Stop Test
+                              </button>
+                            )}
 
-                            <button
-                              onClick={async () => {
-                                const token = localStorage.getItem('token');
-                                try {
-                                  const res = await fetch(`http://localhost:5000/api/jobs/${job.id}/aptitude-test/submissions`, { headers: { Authorization: `Bearer ${token}` } });
-                                  const d = await res.json();
-                                  if (!res.ok) {
-                                    alert(d.message || 'Failed to fetch submissions');
-                                  } else {
-                                    const subs = d.data.submissions || [];
-                                    const passed = subs.filter(s => s.passed).length;
-                                    alert(`${subs.length} submissions — ${passed} passed, ${subs.length - passed} failed`);
-                                  }
-                                } catch (err) {
-                                  console.error('Failed to fetch submissions:', err);
-                                  alert('Failed to fetch submissions');
-                                }
-                              }}
-                              className="inline-flex items-center gap-2 px-3 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm"
-                            >
-                              View Results
-                            </button>
+                            {/* Show View Test button only if test is CREATED or STARTED (not STOPPED) */}
+                            {testsMap[job.id]?.status !== 'STOPPED' && (
+                              <button
+                                onClick={() => { setIsViewTestOpen(true); setViewTestJobId(job.id); }}
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm"
+                              >
+                                View Test
+                              </button>
+                            )}
                           </>
                         ) : (
                           <button
