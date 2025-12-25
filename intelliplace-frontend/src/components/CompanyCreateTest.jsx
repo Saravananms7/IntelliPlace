@@ -34,35 +34,52 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
   const [showAddQuestion, setShowAddQuestion] = useState(false);
   const [newQuestion, setNewQuestion] = useState(emptyQuestion);
 
-  /* ---------- INIT ---------- */
+  /* ================= INIT ================= */
   useEffect(() => {
     if (!isOpen) return;
+
     setSections(defaultSections);
+
     const map = {};
     defaultSections.forEach((_, i) => (map[i] = []));
     setQuestionsBySection(map);
+
     setActiveSection(0);
     setCutoff(50);
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  /* ---------- SECTION ---------- */
+  /* ================= SECTION ================= */
 
   const updateSection = (i, key, value) => {
-    setSections((p) =>
-      p.map((s, idx) => (idx === i ? { ...s, [key]: value } : s))
+    setSections((prev) =>
+      prev.map((s, idx) => (idx === i ? { ...s, [key]: value } : s))
     );
+
+    // 🔒 IMPORTANT FIX: rename section inside existing questions
+    if (key === "name") {
+      setQuestionsBySection((prev) => {
+        const updated = { ...prev };
+        updated[i] = updated[i].map((q) => ({
+          ...q,
+          section: value
+        }));
+        return updated;
+      });
+    }
   };
 
   const addSection = () => {
+    const index = sections.length;
     setSections((p) => [...p, { name: "New Section", questions: 5 }]);
-    setQuestionsBySection((p) => ({ ...p, [sections.length]: [] }));
-    setActiveSection(sections.length);
+    setQuestionsBySection((p) => ({ ...p, [index]: [] }));
+    setActiveSection(index);
   };
 
   const removeSection = (i) => {
     if (sections.length === 1) return;
+
     Swal.fire({
       title: "Remove Section?",
       text: "All questions inside this section will be deleted",
@@ -71,17 +88,22 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
       confirmButtonColor: "#dc2626"
     }).then((res) => {
       if (!res.isConfirmed) return;
+
       setSections((p) => p.filter((_, idx) => idx !== i));
+
       setQuestionsBySection((p) => {
-        const n = { ...p };
-        delete n[i];
+        const n = {};
+        Object.keys(p)
+          .filter((k) => Number(k) !== i)
+          .forEach((k, idx) => (n[idx] = p[k]));
         return n;
       });
+
       setActiveSection(0);
     });
   };
 
-  /* ---------- QUESTION ---------- */
+  /* ================= QUESTION ================= */
 
   const addQuestion = () => {
     if (!newQuestion.questionText || newQuestion.options.some((o) => !o)) {
@@ -103,7 +125,10 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
 
     setQuestionsBySection((p) => ({
       ...p,
-      [activeSection]: [...p[activeSection], newQuestion]
+      [activeSection]: [
+        ...p[activeSection],
+        { ...newQuestion, section: sections[activeSection].name }
+      ]
     }));
 
     setNewQuestion(emptyQuestion);
@@ -117,13 +142,13 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
     }));
   };
 
-  /* ---------- VALIDATION ---------- */
+  /* ================= VALIDATION ================= */
 
   const allSectionsComplete = sections.every(
     (s, i) => questionsBySection[i]?.length === s.questions
   );
 
-  /* ---------- SUBMIT ---------- */
+  /* ================= SUBMIT ================= */
 
   const handleSubmit = async () => {
     if (!allSectionsComplete) {
@@ -137,8 +162,8 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
 
     try {
       setLoading(true);
-      const questions = [];
 
+      const questions = [];
       sections.forEach((s, i) =>
         questionsBySection[i].forEach((q) =>
           questions.push({ ...q, section: s.name })
@@ -179,7 +204,7 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
     }
   };
 
-  /* ---------- UI ---------- */
+  /* ================= UI ================= */
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
@@ -190,7 +215,7 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
       >
         {/* HEADER */}
         <div className="flex justify-between p-5 border-b">
-          <h2 className="text-xl font-semibold">Create Quiz</h2>
+          <h2 className="text-xl font-semibold">Create Aptitude Test</h2>
           <button onClick={onClose}><X /></button>
         </div>
 
@@ -206,13 +231,12 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
                 <div
                   key={i}
                   onClick={() => setActiveSection(i)}
-                  className={`relative p-4 rounded-xl border cursor-pointer transition ${
+                  className={`relative p-4 rounded-xl border cursor-pointer ${
                     activeSection === i
                       ? "bg-blue-50 border-blue-500"
                       : "bg-white hover:bg-gray-100"
                   }`}
                 >
-                  {/* REMOVE */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -231,32 +255,30 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
                     }
                   />
 
-                  <div className="flex justify-between items-center mt-2">
+                  <div className="flex justify-between mt-2">
                     <input
                       type="number"
                       min={1}
-                      className="input w-20 text-xs"
                       value={s.questions}
                       onChange={(e) =>
                         updateSection(i, "questions", +e.target.value || 1)
                       }
+                      className="input w-20 text-xs"
                     />
 
                     {done ? (
-                      <span className="flex items-center gap-1 text-green-600 text-xs font-medium">
+                      <span className="flex items-center gap-1 text-green-600 text-xs">
                         <CheckCircle size={14} /> Complete
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1 text-yellow-600 text-xs font-medium">
+                      <span className="flex items-center gap-1 text-yellow-600 text-xs">
                         <AlertCircle size={14} /> Pending
                       </span>
                     )}
                   </div>
 
                   <div className="mt-2 text-xs">
-                    <span className="px-2 py-0.5 rounded-full bg-gray-200">
-                      {count}/{s.questions} questions
-                    </span>
+                    {count}/{s.questions} questions
                   </div>
                 </div>
               );
@@ -284,41 +306,38 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
               </button>
             </div>
 
-            <div className="space-y-4">
-              {questionsBySection[activeSection]?.map((q, qi) => (
-                <div key={qi} className="border rounded-xl p-4 bg-gray-50">
-                  <div className="flex justify-between">
-                    <p className="font-medium">
-                      Q{qi + 1}. {q.questionText}
-                    </p>
-                    <button onClick={() => removeQuestion(qi)}>
-                      <Trash2 size={16} className="text-red-500" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 mt-3">
-                    {q.options.map((o, oi) => (
-                      <div
-                        key={oi}
-                        className={`flex items-center gap-2 p-2 rounded-lg border ${
-                          q.correctIndex === oi
-                            ? "bg-green-100 border-green-500 text-green-800 font-semibold"
-                            : "bg-white border-gray-200"
-                        }`}
-                      >
-                        {q.correctIndex === oi && <Check size={14} />}
-                        {String.fromCharCode(65 + oi)}. {o}
-                      </div>
-                    ))}
-                  </div>
+            {questionsBySection[activeSection]?.map((q, qi) => (
+              <div key={qi} className="border rounded-xl p-4 mb-4 bg-gray-50">
+                <div className="flex justify-between">
+                  <p className="font-medium">
+                    Q{qi + 1}. {q.questionText}
+                  </p>
+                  <button onClick={() => removeQuestion(qi)}>
+                    <Trash2 size={16} className="text-red-500" />
+                  </button>
                 </div>
-              ))}
-            </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  {q.options.map((o, oi) => (
+                    <div
+                      key={oi}
+                      className={`p-2 rounded border ${
+                        q.correctIndex === oi
+                          ? "bg-green-100 border-green-500"
+                          : "bg-white"
+                      }`}
+                    >
+                      {String.fromCharCode(65 + oi)}. {o}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
         {/* FOOTER */}
-        <div className="p-5 border-t bg-gray-50 flex justify-between items-center">
+        <div className="p-5 border-t flex justify-between items-center bg-gray-50">
           <div>
             <label className="text-sm font-semibold">Cutoff (%)</label>
             <input
@@ -327,7 +346,7 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
               max={100}
               value={cutoff}
               onChange={(e) => setCutoff(e.target.value)}
-              className="input w-32"
+              className="input w-28"
             />
           </div>
 
@@ -365,10 +384,10 @@ const CompanyCreateTest = ({ isOpen, onClose, jobId, onCreated }) => {
               {newQuestion.options.map((o, i) => (
                 <label
                   key={i}
-                  className={`flex gap-2 p-2 rounded-lg border cursor-pointer ${
+                  className={`flex gap-2 p-2 rounded border cursor-pointer ${
                     newQuestion.correctIndex === i
                       ? "bg-green-50 border-green-500"
-                      : "border-gray-200 hover:bg-gray-50"
+                      : "border-gray-200"
                   }`}
                 >
                   <input

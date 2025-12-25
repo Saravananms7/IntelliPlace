@@ -779,33 +779,91 @@ router.get('/:jobId/aptitude-test/status', authenticateToken, authorizeStudent, 
   }
 });
 
-// Student: fetch public questions (only allowed once test is STARTED)
-router.get('/:jobId/aptitude-test/questions/public', authenticateToken, authorizeStudent, async (req, res) => {
-  try {
-    const studentId = req.user.id;
-    const jobId = parseInt(req.params.jobId);
+// Student: fetch public questions (SECTION-WISE)
+router.get(
+  '/:jobId/aptitude-test/questions/public',
+  authenticateToken,
+  authorizeStudent,
+  async (req, res) => {
+    try {
+      const studentId = req.user.id;
+      const jobId = parseInt(req.params.jobId);
 
-    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
-    if (!test) return res.status(404).json({ success: false, message: 'No aptitude test found for this job' });
-    if (test.status !== 'STARTED') return res.status(400).json({ success: false, message: 'Test has not started yet' });
+      const test = await prisma.aptitudeTest.findUnique({
+        where: { jobId }
+      });
 
-    // Ensure the student is shortlisted for this job
-    const application = await prisma.application.findFirst({ where: { jobId, studentId } });
-    if (!application || application.status !== 'SHORTLISTED') {
-      return res.status(403).json({ success: false, message: 'You are not eligible to take this test' });
+      if (!test) {
+        return res.status(404).json({
+          success: false,
+          message: 'No aptitude test found for this job'
+        });
+      }
+
+      if (test.status !== 'STARTED') {
+        return res.status(400).json({
+          success: false,
+          message: 'Test has not started yet'
+        });
+      }
+
+      // Check student eligibility
+      const application = await prisma.application.findFirst({
+        where: { jobId, studentId }
+      });
+
+      if (!application || application.status !== 'SHORTLISTED') {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not eligible to take this test'
+        });
+      }
+
+      // Fetch all questions
+      const questions = await prisma.aptitudeQuestion.findMany({
+        where: { testId: test.id },
+        orderBy: { createdAt: 'asc' }
+      });
+
+      // 🔥 GROUP QUESTIONS BY SECTION
+      const sectionMap = {};
+
+      for (const q of questions) {
+        if (!sectionMap[q.section]) {
+          sectionMap[q.section] = [];
+        }
+
+        sectionMap[q.section].push({
+          id: q.id,
+          questionText: q.questionText,
+          options: q.options,
+          marks: q.marks
+        });
+      }
+
+      // Convert map → array
+      const sections = Object.keys(sectionMap).map(sectionName => ({
+        title: sectionName,
+        questions: sectionMap[sectionName]
+      }));
+
+      return res.json({
+        success: true,
+        data: {
+          sections,
+          totalQuestions: questions.length
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching public questions:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error fetching questions'
+      });
     }
-
-    const questions = await prisma.aptitudeQuestion.findMany({ where: { testId: test.id }, orderBy: { createdAt: 'asc' } });
-
-    // Strip correctIndex when sending to students
-    const publicQuestions = questions.map(q => ({ id: q.id, section: q.section, questionText: q.questionText, options: q.options, marks: q.marks }));
-
-    res.json({ success: true, data: { questions: publicQuestions } });
-  } catch (error) {
-    console.error('Error fetching public questions:', error);
-    res.status(500).json({ success: false, message: 'Server error fetching questions' });
   }
-});
+);
+
 
 // Student: submit aptitude test answers
 router.post('/:jobId/aptitude-test/submit', authenticateToken, authorizeStudent, async (req, res) => {
