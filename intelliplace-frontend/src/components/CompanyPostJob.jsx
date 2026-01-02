@@ -4,7 +4,7 @@ import { X, Download } from 'lucide-react';
 
 const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
   if (!isOpen) return null;
-  const [form, setForm] = useState({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', deadline: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
+  const [form, setForm] = useState({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '', deadline: '' });
   const [jobDescriptionFile, setJobDescriptionFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
@@ -63,7 +63,6 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         formData.append('type', form.type);
         if (form.location) formData.append('location', form.location);
         if (form.salary) formData.append('salary', form.salary);
-        if (form.deadline) formData.append('deadline', form.deadline);
         if (form.requiredSkills) {
           const skills = form.requiredSkills.split(',').map(s => s.trim()).filter(s => s);
           formData.append('requiredSkills', JSON.stringify(skills));
@@ -72,6 +71,7 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         formData.append('includeCgpaInShortlisting', form.includeCgpaInShortlisting);
         formData.append('allowBacklog', form.allowBacklog);
         if (form.maxBacklog) formData.append('maxBacklog', form.maxBacklog);
+        if (form.deadline) formData.append('deadline', form.deadline);
         formData.append('jobDescriptionFile', jobDescriptionFile);
 
         const res = await fetch('http://localhost:5000/api/jobs', {
@@ -82,7 +82,7 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         const data = await res.json();
         if (res.ok) {
           setMessage({ type: 'success', text: 'Job created successfully' });
-          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', deadline: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
+          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '', deadline: '' });
           setJobDescriptionFile(null);
           onCreated && onCreated();
         } else {
@@ -92,6 +92,7 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         const body = {
           ...form,
           requiredSkills: form.requiredSkills ? form.requiredSkills.split(',').map(s => s.trim()).filter(s => s) : [],
+          deadline: form.deadline || null,
         };
         const res = await fetch('http://localhost:5000/api/jobs', {
           method: 'POST',
@@ -101,7 +102,7 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
         const data = await res.json();
         if (res.ok) {
           setMessage({ type: 'success', text: 'Job created successfully' });
-          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', deadline: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '' });
+          setForm({ title: '', description: '', type: 'FULL_TIME', location: '', salary: '', requiredSkills: '', minCgpa: '', includeCgpaInShortlisting: true, allowBacklog: false, maxBacklog: '', deadline: '' });
           setJobDescriptionFile(null);
           onCreated && onCreated();
         } else {
@@ -206,28 +207,15 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Application Deadline</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Required Skills</label>
                 <input
-                  name="deadline"
-                  type="datetime-local"
-                  value={form.deadline}
+                  name="requiredSkills"
+                  value={form.requiredSkills}
                   onChange={handleChange}
-                  min={new Date().toISOString().slice(0, 16)}
+                  placeholder="e.g. React, Node.js, SQL"
                   className="input"
                 />
-                <p className="text-xs text-gray-500 mt-1">Applications will be closed after this date</p>
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Required Skills</label>
-              <input
-                name="requiredSkills"
-                value={form.requiredSkills}
-                onChange={handleChange}
-                placeholder="e.g. React, Node.js, SQL"
-                className="input"
-              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -292,6 +280,20 @@ const CompanyPostJob = ({ isOpen, onClose, onCreated }) => {
                   )}
                 </div>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Application Deadline <span className="text-gray-400 text-xs font-normal">(Optional)</span>
+              </label>
+              <input
+                name="deadline"
+                type="datetime-local"
+                value={form.deadline}
+                onChange={handleChange}
+                className="input"
+                min={new Date().toISOString().slice(0, 16)}
+              />
             </div>
 
             <div>

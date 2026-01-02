@@ -9,12 +9,11 @@ import {
   GraduationCap,
   X,
   FileText,
-  Globe,IndianRupee
-,
+  Globe,
+  DollarSign,
   Eye
 } from 'lucide-react';
 import { getCurrentUser } from '../utils/auth';
-import Modal from './Modal';
 
 const JobList = () => {
   const [jobs, setJobs] = useState([]);
@@ -22,9 +21,7 @@ const JobList = () => {
   const [selectedJob, setSelectedJob] = useState(null);
   const [applyState, setApplyState] = useState({ cgpa: '', backlog: '', cv: null });
   const [message, setMessage] = useState(null);
-  const [modal, setModal] = useState(null);
   const [appliedJobs, setAppliedJobs] = useState(new Set());
-  const [applicationStatuses, setApplicationStatuses] = useState({}); // jobId -> status
   const [previewJobDesc, setPreviewJobDesc] = useState(null);
   const [eligibilityError, setEligibilityError] = useState(null);
 
@@ -43,16 +40,8 @@ const JobList = () => {
 
       if (applicationsRes.ok) {
         const appJson = await applicationsRes.json();
-        const applications = appJson.data?.applications || [];
-        const appliedIds = new Set(applications.map(app => app.jobId));
+        const appliedIds = new Set((appJson.data?.applications || []).map(app => app.jobId));
         setAppliedJobs(appliedIds);
-        
-        // Create a map of jobId -> status
-        const statusMap = {};
-        applications.forEach(app => {
-          statusMap[app.jobId] = app.status;
-        });
-        setApplicationStatuses(statusMap);
       }
     } catch (err) {
       console.error(err);
@@ -143,7 +132,7 @@ const JobList = () => {
 
   const handleJobDescriptionFile = async (job) => {
     if (!job.jobDescriptionFileUrl) {
-      setModal({ title: 'Job Description not available', text: 'No job description file available', type: 'error' });
+      alert('No job description file available');
       return;
     }
 
@@ -169,7 +158,7 @@ const JobList = () => {
       }
     } catch (err) {
       console.error('Failed to open job description file:', err);
-      setModal({ title: 'Job Description error', text: 'Failed to open job description file. Please try again.', type: 'error' });
+      alert('Failed to open job description file. Please try again.');
     }
   };
 
@@ -244,6 +233,9 @@ const JobList = () => {
         <div className="grid grid-cols-1 gap-6">
           {jobs.map(job => {
             const isApplied = appliedJobs.has(job.id);
+            const isDeadlinePassed = job.deadline && new Date(job.deadline) < new Date();
+            const isJobClosed = job.status !== 'OPEN';
+            const canApply = !isApplied && !isDeadlinePassed && !isJobClosed;
               return (
               <motion.div
                 key={job.id}
@@ -253,35 +245,11 @@ const JobList = () => {
                   isApplied ? 'border-green-500 bg-green-50/30' : 'hover:shadow-md'
                 }`}
               >
-                {/* Modal for critical job-related errors */}
-                <Modal open={!!modal} title={modal?.title} message={modal?.text} type={modal?.type} onClose={() => setModal(null)} actions={[]} />
-            
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
                   <div className="flex-grow">
-                    <div className="flex items-center gap-3 mb-3 flex-wrap">
+                    <div className="flex items-center gap-3 mb-3">
                       <h3 className="text-xl font-semibold text-gray-900">{job.title}</h3>
-                      {isApplied && applicationStatuses[job.id] && (
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                          applicationStatuses[job.id] === 'PASSED APTITUDE' 
-                            ? 'bg-green-100 text-green-800 border border-green-200' 
-                            : applicationStatuses[job.id] === 'FAILED APTITUDE'
-                            ? 'bg-red-100 text-red-800 border border-red-200'
-                            : applicationStatuses[job.id] === 'SHORTLISTED'
-                            ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                            : applicationStatuses[job.id] === 'REJECTED'
-                            ? 'bg-red-100 text-red-800 border border-red-200'
-                            : applicationStatuses[job.id] === 'PENDING'
-                            ? 'bg-yellow-100 text-yellow-800 border border-yellow-200'
-                            : applicationStatuses[job.id] === 'REVIEWING'
-                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
-                            : applicationStatuses[job.id] === 'HIRED'
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                            : 'bg-gray-100 text-gray-800 border border-gray-200'
-                        }`}>
-                          {applicationStatuses[job.id]}
-                        </span>
-                      )}
-                      {isApplied && !applicationStatuses[job.id] && (
+                      {isApplied && (
                         <span className="px-2.5 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
                           Applied
                         </span>
@@ -309,7 +277,7 @@ const JobList = () => {
                       </div>
                       {job.salary && (
                         <div className="flex items-start gap-2">
-                          <IndianRupee className="w-4 h-4 text-gray-400 mt-1" />
+                          <DollarSign className="w-4 h-4 text-gray-400 mt-1" />
                           <div>
                             <p className="text-sm text-gray-500">Salary</p>
                             <p className="font-medium text-gray-900">{job.salary}</p>
@@ -378,11 +346,11 @@ const JobList = () => {
                         <span>Posted {new Date(job.createdAt).toLocaleDateString()}</span>
                       </div>
                       {job.deadline && (
-                        <div className={`flex items-center gap-1 ${new Date(job.deadline) < new Date() ? 'text-red-600 font-medium' : ''}`}>
+                        <div className="flex items-center gap-1">
                           <Clock className="w-4 h-4" />
-                          <span>
+                          <span className={isDeadlinePassed ? 'text-red-600 font-medium' : ''}>
                             Deadline: {new Date(job.deadline).toLocaleString()}
-                            {new Date(job.deadline) < new Date() && ' (Passed)'}
+                            {isDeadlinePassed && ' (Passed)'}
                           </span>
                         </div>
                       )}
@@ -410,20 +378,13 @@ const JobList = () => {
                       >
                         Applied ✓
                       </button>
-                    ) : job.deadline && new Date(job.deadline) < new Date() ? (
+                    ) : !canApply ? (
                       <button
                         disabled
                         className="btn bg-gray-100 text-gray-500 disabled:opacity-60 cursor-not-allowed w-full"
-                        title={`Application deadline passed: ${new Date(job.deadline).toLocaleString()}`}
+                        title={isDeadlinePassed ? 'Application deadline has passed' : isJobClosed ? 'Applications are closed' : ''}
                       >
-                        Deadline Passed
-                      </button>
-                    ) : job.status !== 'OPEN' ? (
-                      <button
-                        disabled
-                        className="btn bg-gray-100 text-gray-500 disabled:opacity-60 cursor-not-allowed w-full"
-                      >
-                        Applications Closed
+                        {isDeadlinePassed ? 'Deadline Passed' : isJobClosed ? 'Closed' : 'Not Available'}
                       </button>
                     ) : (
                       <button 
@@ -671,8 +632,6 @@ const JobList = () => {
           </div>
         </div>
       )}
-
-      <Modal open={!!modal} title={modal?.title} message={modal?.text} type={modal?.type} onClose={() => setModal(null)} actions={[]} />
     </div>
   );
 };

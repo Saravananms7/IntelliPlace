@@ -1,14 +1,11 @@
 import { useState, useEffect } from 'react';
-import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle, Play } from 'lucide-react';
+import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import Modal from './Modal';
 
 const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [aptitudeTest, setAptitudeTest] = useState(null);
-  const [testLoading, setTestLoading] = useState(false);
 
   // Fetch applications for a job
   const fetchApplications = async () => {
@@ -22,23 +19,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       });
       const json = await res.json();
       if (res.ok) {
-        const apps = json.data.applications || [];
-        // Sort applications by status priority
-        const statusPriority = {
-          'PASSED APTITUDE': 1,
-          'SHORTLISTED': 2,
-          'PENDING': 3,
-          'REVIEWING': 4,
-          'FAILED APTITUDE': 5,
-          'REJECTED': 6,
-          'HIRED': 7,
-        };
-        const sortedApps = apps.sort((a, b) => {
-          const priorityA = statusPriority[a.status] || 99;
-          const priorityB = statusPriority[b.status] || 99;
-          return priorityA - priorityB;
-        });
-        setApplications(sortedApps);
+        setApplications(json.data.applications || []);
       } else {
         setError(json.message || 'Failed to fetch applications');
       }
@@ -49,93 +30,25 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     }
   };
 
+  useEffect(() => {
+    if (jobId) fetchApplications();
+  }, [jobId]);
 
+  const [actionLoading, setActionLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState(null);
   const [jobStatus, setJobStatus] = useState(initialJobStatus || 'OPEN');
-  const [modal, setModal] = useState(null);
+  const [confirming, setConfirming] = useState(false);
 
   const [previewCV, setPreviewCV] = useState(null);
   const [expandedApp, setExpandedApp] = useState(null);
   const [atsLoading, setAtsLoading] = useState(false);
   const [atsProgress, setAtsProgress] = useState(null);
   const [closeLoading, setCloseLoading] = useState(false);
-  const [confirmAts, setConfirmAts] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
-  const [confirmStartTest, setConfirmStartTest] = useState(false);
-  
-  // Fetch aptitude test info
-  const fetchAptitudeTest = async () => {
-    if (!jobId) return;
-    try {
-      const res = await fetch(`http://localhost:5000/api/jobs/${jobId}/aptitude-test`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-      if (res.ok) {
-        const json = await res.json();
-        setAptitudeTest(json.data?.test || null);
-      } else {
-        // Test doesn't exist yet, that's okay
-        setAptitudeTest(null);
-      }
-    } catch (err) {
-      console.error('Error fetching aptitude test:', err);
-      setAptitudeTest(null);
-    }
-  };
-
-  useEffect(() => {
-    if (jobId) {
-      fetchApplications();
-      fetchAptitudeTest();
-    }
-  }, [jobId]);
-  
-  const handleCloseApplication = async () => {
-    setCloseLoading(true);
-    setActionMessage(null);
-    
-    try {
-      const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/close`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      
-      const json = await res.json();
-      
-      if (res.ok) {
-        setActionMessage({
-          type: 'success',
-          text: json.message || 'Applications closed successfully',
-        });
-        setJobStatus('CLOSED');
-      } else {
-        setActionMessage({
-          type: 'error',
-          text: json.message || 'Failed to close applications',
-        });
-      }
-    } catch (err) {
-      setActionMessage({ 
-        type: 'error', 
-        text: `Error: ${err.message}` 
-      });
-    } finally {
-      setCloseLoading(false);
-      setConfirmClose(false);
-    }
-  };
   
   const downloadCV = (application) => {
     if (!application.cvUrl) {
-      setModal({ title: 'CV not available', text: 'No CV available for this applicant', type: 'error' });
+      alert('No CV available for this applicant');
       return;
     }
 
@@ -158,28 +71,11 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
 
   const exportToExcel = () => {
     if (applications.length === 0) {
-      setActionMessage({ type: 'error', text: 'No applications to export' });
+      alert('No applications to export');
       return;
     }
-    
-    // Sort applications by status priority
-    const statusPriority = {
-      'PASSED APTITUDE': 1,
-      'SHORTLISTED': 2,
-      'PENDING': 3,
-      'REVIEWING': 4,
-      'FAILED APTITUDE': 5,
-      'REJECTED': 6,
-      'HIRED': 7,
-    };
-    
-    const sortedApplications = [...applications].sort((a, b) => {
-      const priorityA = statusPriority[a.status] || 99;
-      const priorityB = statusPriority[b.status] || 99;
-      return priorityA - priorityB;
-    });
-    
-    const exportData = sortedApplications.map((app, index) => {
+
+    const exportData = applications.map((app, index) => {
       const displayCgpa = app.cgpa || app.student.cgpa || 'N/A';
       const displayBacklog = app.backlog !== null ? app.backlog : (app.student.backlog !== null ? app.student.backlog : 'N/A');
       
@@ -190,13 +86,14 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
         'Email': app.student.email || 'N/A',
         'Phone': app.student.phone || 'N/A',
         'CGPA': app.cgpa || 'N/A',
-        'Backlog (Application)': app.backlog !== null ? app.backlog : 'N/A',
-        'Backlog (Profile)': app.student.backlog !== null ? app.student.backlog : 'N/A',
-        'Status': app.status || 'N/A',
-        'Applied Date': new Date(app.createdAt).toLocaleString(),
-        'CV Available': app.cvUrl ? 'Yes' : 'No',
-      };
-    });
+       // 'CGPA (Profile)': app.student.cgpa || 'N/A',
+         'Backlog (Application)': app.backlog !== null ? app.backlog : 'N/A',
+         'Backlog (Profile)': app.student.backlog !== null ? app.student.backlog : 'N/A',
+         //'Status': app.status || 'N/A',
+         'Applied Date': new Date(app.createdAt).toLocaleString(),
+         'CV Available': app.cvUrl ? 'Yes' : 'No',
+       };
+     });
 
      const worksheet = XLSX.utils.json_to_sheet(exportData);
      const workbook = XLSX.utils.book_new();
@@ -206,9 +103,58 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
      XLSX.writeFile(workbook, fileName);
    };
 
+  const handleCloseApplication = async () => {
+    if (!window.confirm('Are you sure you want to close applications for this job? This will prevent new applications.')) {
+      setConfirmClose(false);
+      return;
+    }
+
+    setCloseLoading(true);
+    setActionMessage(null);
+    
+    try {
+      const res = await fetch(
+        `http://localhost:5000/api/jobs/${jobId}/close`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+          },
+        }
+      );
+      
+      const json = await res.json();
+      if (res.ok) {
+        setActionMessage({
+          type: 'success',
+          text: json.message || 'Applications closed successfully',
+        });
+        setJobStatus('CLOSED');
+        await fetchApplications();
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: json.message || 'Failed to close applications',
+        });
+      }
+    } catch (err) {
+      setActionMessage({ 
+        type: 'error', 
+        text: `Error: ${err.message}` 
+      });
+    } finally {
+      setCloseLoading(false);
+      setConfirmClose(false);
+    }
+  };
+
   const handleAtsShortlist = async () => {
     if (applications.length === 0) {
-      setActionMessage({ type: 'error', text: 'No applications to shortlist' });
+      alert('No applications to shortlist');
+      return;
+    }
+
+    if (!window.confirm(`This will evaluate all ${applications.length} applications using AI resume analysis. Continue?`)) {
       return;
     }
 
@@ -274,48 +220,6 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     }
   };
 
-  const handleStartTest = async () => {
-    setTestLoading(true);
-    setActionMessage(null);
-    
-    try {
-      const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/aptitude-test/start`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-      
-      const json = await res.json();
-      
-      if (res.ok) {
-        const invitedCount = json.data?.invited || 0;
-        setActionMessage({
-          type: 'success',
-          text: `Aptitude test started successfully! Notifications sent to ${invitedCount} shortlisted student(s).`,
-        });
-        await fetchAptitudeTest(); // Refresh test status
-      } else {
-        setActionMessage({
-          type: 'error',
-          text: json.message || 'Failed to start aptitude test',
-        });
-      }
-    } catch (err) {
-      setActionMessage({ 
-        type: 'error', 
-        text: `Error: ${err.message}` 
-      });
-    } finally {
-      setTestLoading(false);
-      setConfirmStartTest(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
@@ -333,11 +237,9 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                     <FileDown className="w-4 h-4" />
                     Export Excel
                   </button>
-
-                  {/* Shortlisting should be available even after applications are closed — companies may still want to process existing applicants */}
-                  {!confirmAts ? (
+                  {jobStatus === 'OPEN' && (
                     <button
-                      onClick={() => setConfirmAts(true)}
+                      onClick={handleAtsShortlist}
                       disabled={atsLoading}
                       className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Shortlist using AI Resume Analysis"
@@ -345,88 +247,100 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                       <Sparkles className="w-4 h-4" />
                       {atsLoading ? (atsProgress || 'Processing...') : 'Shortlist using Resume'}
                     </button>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-700">Shortlist all applicants now?</span>
-                      <button
-                        onClick={async () => {
-                          await handleAtsShortlist();
-                          setConfirmAts(false);
-                        }}
-                        className="px-3 py-1 bg-green-600 text-white rounded-md text-sm"
-                        disabled={atsLoading}
-                      >
-                        {atsLoading ? (atsProgress || 'Processing...') : 'Confirm'}
-                      </button>
-                      <button onClick={() => setConfirmAts(false)} className="px-3 py-1 border rounded-md text-sm">Cancel</button>
-                    </div>
                   )}
-
-                  {/* Close applications button only shown when job is open */}
                   {jobStatus === 'OPEN' && (
-                    !confirmClose ? (
-                      <button
-                        onClick={() => setConfirmClose(true)}
-                        disabled={closeLoading || atsLoading}
-                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Close applications manually"
-                      >
-                        <XCircle className="w-4 h-4" />
-                        {closeLoading ? 'Closing...' : 'Close Applications'}
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-700">Are you sure?</span>
-                        <button
-                          onClick={handleCloseApplication}
-                          className="px-3 py-1 bg-green-600 text-white rounded-md text-sm"
-                          disabled={closeLoading}
-                        >
-                          {closeLoading ? 'Closing...' : 'Confirm'}
-                        </button>
-                        <button onClick={() => setConfirmClose(false)} className="px-3 py-1 border rounded-md text-sm">Cancel</button>
-                      </div>
-                    )
-                  )}
-
-                  {/* Start Test button only shown when job is CLOSED and test exists and is not STARTED */}
-                  {jobStatus === 'CLOSED' && aptitudeTest && aptitudeTest.status !== 'STARTED' && (
-                    !confirmStartTest ? (
-                      <button
-                        onClick={() => setConfirmStartTest(true)}
-                        disabled={testLoading || atsLoading}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Start aptitude test for shortlisted students"
-                      >
-                        <Play className="w-4 h-4" />
-                        {testLoading ? 'Starting...' : 'Start Test'}
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-700">Start test for shortlisted students?</span>
-                        <button
-                          onClick={handleStartTest}
-                          className="px-3 py-1 bg-green-600 text-white rounded-md text-sm"
-                          disabled={testLoading}
-                        >
-                          {testLoading ? 'Starting...' : 'Confirm'}
-                        </button>
-                        <button onClick={() => setConfirmStartTest(false)} className="px-3 py-1 border rounded-md text-sm">Cancel</button>
-                      </div>
-                    )
-                  )}
-
-                  {/* Show test status if already started */}
-                  {aptitudeTest && aptitudeTest.status === 'STARTED' && (
-                    <div className="flex items-center gap-2 px-4 py-2 bg-green-100 text-green-800 rounded-lg text-sm font-medium">
-                      <Play className="w-4 h-4" />
-                      Test Started
-                    </div>
+                    <button
+                      onClick={() => setConfirmClose(true)}
+                      disabled={closeLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Manually Close Applications"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      {closeLoading ? 'Closing...' : 'Close Applications'}
+                    </button>
                   )}
                 </>
               )}
-
-
+              {confirmClose && jobStatus === 'OPEN' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-700">Close applications?</span>
+                  <button
+                    onClick={handleCloseApplication}
+                    className="btn btn-primary"
+                    disabled={closeLoading}
+                  >
+                    {closeLoading ? 'Closing...' : 'Confirm'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmClose(false)}
+                    className="btn btn-ghost"
+                    disabled={closeLoading}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+              {jobStatus === 'OPEN' && !confirming && !confirmClose && (
+                <button
+                  onClick={() => setConfirming(true)}
+                  className="btn btn-warning"
+                  disabled={actionLoading}
+                >
+                 
+                </button>
+              )}
+              {confirming && jobStatus === 'OPEN' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-700">Are you sure?</span>
+                  <button
+                    onClick={async () => {
+                      setActionLoading(true);
+                      setActionMessage(null);
+                      try {
+                        const res = await fetch(
+                          `http://localhost:5000/api/jobs/${jobId}/shortlist`,
+                          {
+                            method: 'POST',
+                            headers: {
+                              Authorization: `Bearer ${localStorage.getItem('token')}`,
+                            },
+                          }
+                        );
+                        const json = await res.json();
+                        if (res.ok) {
+                          setActionMessage({
+                            type: 'success',
+                            text: json.message || 'Shortlisting complete',
+                          });
+                          await fetchApplications();
+                          setJobStatus('CLOSED');
+                        } else {
+                          setActionMessage({
+                            type: 'error',
+                            text: json.message || 'Shortlisting failed',
+                          });
+                        }
+                      } catch (err) {
+                        setActionMessage({ type: 'error', text: err.message });
+                      } finally {
+                        setActionLoading(false);
+                        setConfirming(false);
+                      }
+                    }}
+                    className="btn btn-primary"
+                    disabled={actionLoading}
+                  >
+                    {actionLoading ? 'Processing...' : 'Confirm'}
+                  </button>
+                  <button
+                    onClick={() => setConfirming(false)}
+                    className="btn btn-ghost"
+                    disabled={actionLoading}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
               <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
                 ×
               </button>
@@ -511,11 +425,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                           <div className="flex items-center justify-between">
                             <span
                               className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                                app.status === 'PASSED APTITUDE'
-                                  ? 'bg-green-100 text-green-800 border border-green-200'
-                                  : app.status === 'FAILED APTITUDE'
-                                  ? 'bg-red-100 text-red-800 border border-red-200'
-                                  : app.status === 'PENDING'
+                                app.status === 'PENDING'
                                   ? 'bg-yellow-100 text-yellow-800'
                                   : app.status === 'REVIEWING'
                                   ? 'bg-blue-100 text-blue-800'
@@ -712,8 +622,6 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
           </div>
         </div>
       )}
-
-      <Modal open={!!modal} title={modal?.title} message={modal?.text} type={modal?.type} onClose={() => setModal(null)} actions={[]} />
     </div>
   );
 };
