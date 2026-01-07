@@ -13,6 +13,31 @@ const authorizeStudent = (req, res, next) => {
 // Get notifications for current student
 router.get('/', authenticateToken, authorizeStudent, async (req, res) => {
   try {
+    // Test database connection first
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch (dbError) {
+      console.error('Database connection error in notifications:', dbError);
+      if (dbError.code === 'P1001') {
+        return res.status(503).json({
+          success: false,
+          message: 'Database connection failed. Please check:',
+          error: {
+            code: dbError.code,
+            details: [
+              '1. Verify your DATABASE_URL in .env file',
+              '2. Check if Neon database is active (it may be paused)',
+              '3. Visit Neon Console (https://console.neon.tech/) to wake up the database',
+              '4. Verify network connectivity',
+              '5. Check if database credentials are correct'
+            ],
+            host: dbError.meta?.database_host || 'unknown'
+          }
+        });
+      }
+      throw dbError;
+    }
+
     const studentId = req.user.id;
     const notifications = await prisma.notification.findMany({
       where: { studentId },
@@ -22,7 +47,11 @@ router.get('/', authenticateToken, authorizeStudent, async (req, res) => {
     res.json({ success: true, data: { notifications } });
   } catch (error) {
     console.error('Error fetching notifications:', error);
-    res.status(500).json({ success: false, message: 'Server error fetching notifications' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error fetching notifications',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

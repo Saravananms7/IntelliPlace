@@ -26,6 +26,11 @@ JWT_SECRET=your_super_secret_jwt_key_min_32_chars
 
 # Frontend URL
 FRONTEND_URL=http://localhost:5173
+
+# Judge0 API URL (for coding tests)
+# Default: http://localhost:2358 (for self-hosted Judge0)
+JUDGE0_API_URL=http://localhost:2358
+# JUDGE0_API_KEY=your-api-key-here  # Optional, only if using RapidAPI
 ```
 
 ### 3. Get Neon Database URL

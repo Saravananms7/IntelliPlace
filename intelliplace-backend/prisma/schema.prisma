@@ -22,6 +22,7 @@ model Student {
   updatedAt     DateTime       @updatedAt @map("updated_at")
   applications  Application[]
   notifications Notification[]
+  codingSubmissions CodingSubmission[]
 
   @@index([email])
   @@map("students")
@@ -65,6 +66,7 @@ model Job {
   interviews           Interview[]
   company              Company        @relation(fields: [companyId], references: [id])
   notifications        Notification[]
+  codingTest           CodingTest?
 
   @@index([companyId])
   @@map("jobs")
@@ -140,4 +142,69 @@ model Admin {
 
   @@index([username])
   @@map("admins")
+}
+
+model CodingTest {
+  id            Int              @id @default(autoincrement())
+  jobId         Int              @unique @map("job_id")
+  title         String
+  description   String?
+  allowedLanguages String        @map("allowed_languages") // JSON array of language IDs
+  timeLimit     Int              @default(60) @map("time_limit") // in minutes
+  cutoff        Float?          // minimum score to pass (percentage)
+  status        String           @default("CREATED")
+  startedAt     DateTime?        @map("started_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  job           Job              @relation(fields: [jobId], references: [id])
+  questions     CodingQuestion[]
+  submissions   CodingSubmission[]
+
+  @@index([jobId])
+  @@map("coding_tests")
+}
+
+model CodingQuestion {
+  id            Int          @id @default(autoincrement())
+  testId        Int          @map("test_id")
+  title         String
+  description   String       // Problem statement
+  difficulty    String       @default("MEDIUM") // EASY, MEDIUM, HARD
+  points        Int          @default(10)
+  testCases     String       @map("test_cases") // JSON array of test cases
+  expectedOutputs String     @map("expected_outputs") // JSON array of expected outputs
+  sampleInput   String?      @map("sample_input")
+  sampleOutput  String?      @map("sample_output")
+  constraints   String?      // Problem constraints
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  test          CodingTest   @relation(fields: [testId], references: [id])
+
+  @@index([testId])
+  @@map("coding_questions")
+}
+
+model CodingSubmission {
+  id            Int            @id @default(autoincrement())
+  testId        Int            @map("test_id")
+  questionId    Int            @map("question_id")
+  studentId     Int            @map("student_id")
+  languageId    Int            @map("language_id") // Judge0 language ID
+  code          String         // Submitted code
+  status        String?        // PENDING, ACCEPTED, WRONG_ANSWER, TIME_LIMIT_EXCEEDED, etc.
+  score         Float?         // Score for this question
+  executionTime Float?         @map("execution_time") // in seconds
+  memoryUsed    Int?           @map("memory_used") // in bytes
+  judge0Token   String?        @map("judge0_token") // Judge0 submission token
+  errorMessage  String?         @map("error_message")
+  testCaseResults String?      @map("test_case_results") // JSON array of test case results
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  test          CodingTest     @relation(fields: [testId], references: [id])
+  student       Student        @relation(fields: [studentId], references: [id])
+
+  @@index([testId])
+  @@index([questionId])
+  @@index([studentId])
+  @@map("coding_submissions")
 }

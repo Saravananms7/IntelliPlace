@@ -298,7 +298,7 @@ router.post('/:jobId/apply', authenticateToken, authorizeStudent, upload.single(
         details: reasons.join('; ')
       });
     }
-
+    
     let cvUrl = null;
     if (file) {
       const ext = path.extname(file.originalname).toLowerCase();
@@ -406,7 +406,7 @@ router.post('/:jobId/shortlist', authenticateToken, authorizeCompany, async (req
           } else if (job.allowBacklog === true && typeof job.maxBacklog === 'number') {
             reasons.push(`Active backlogs ${appBacklog} exceeds maximum allowed ${job.maxBacklog}`);
           } else {
-            reasons.push(`Active backlogs ${appBacklog} not allowed`);
+          reasons.push(`Active backlogs ${appBacklog} not allowed`);
           }
         }
         decisionReason = `Rejected — ${reasons.join('; ')}`;
@@ -437,6 +437,72 @@ router.post('/:jobId/shortlist', authenticateToken, authorizeCompany, async (req
   } catch (error) {
     console.error('Error shortlisting applications:', error);
     res.status(500).json({ success: false, message: 'Server error shortlisting applications' });
+  }
+});
+
+// Shortlist all applicants without any criteria (manual shortlisting)
+router.post('/:jobId/shortlist-all', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) {
+      return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+    }
+
+    // Close the job
+    await prisma.job.update({ where: { id: jobId }, data: { status: 'CLOSED' } });
+
+    // Get all applications for this job
+    const applications = await prisma.application.findMany({ 
+      where: { jobId }, 
+      include: { student: true } 
+    });
+
+    if (applications.length === 0) {
+      return res.status(400).json({ success: false, message: 'No applications found for this job' });
+    }
+
+    let shortlisted = 0;
+
+    // Shortlist all applicants
+    for (const app of applications) {
+      await prisma.application.update({
+        where: { id: app.id },
+        data: {
+          status: 'SHORTLISTED',
+          decisionReason: 'Manually shortlisted — all applicants selected'
+        }
+      });
+
+      // Send notification to student
+      try {
+        await prisma.notification.create({
+          data: {
+            studentId: app.studentId,
+            title: 'Application Shortlisted',
+            message: `Your application for ${job.title} has been shortlisted. You can proceed to the next round.`,
+            decisionReason: 'Manually shortlisted — all applicants selected',
+            jobId: jobId,
+            applicationId: app.id
+          }
+        });
+      } catch (nerr) {
+        console.error('Failed to create notification:', nerr);
+      }
+
+      shortlisted++;
+    }
+
+    res.json({
+      success: true,
+      message: `All ${shortlisted} applicants have been shortlisted`,
+      data: { shortlisted, total: applications.length }
+    });
+  } catch (error) {
+    console.error('Error shortlisting all applications:', error);
+    res.status(500).json({ success: false, message: 'Server error shortlisting all applications' });
   }
 });
 

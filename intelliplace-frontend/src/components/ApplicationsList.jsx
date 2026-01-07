@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import Swal from 'sweetalert2';
 
 const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [applications, setApplications] = useState([]);
@@ -44,7 +45,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [atsLoading, setAtsLoading] = useState(false);
   const [atsProgress, setAtsProgress] = useState(null);
   const [closeLoading, setCloseLoading] = useState(false);
-  const [confirmClose, setConfirmClose] = useState(false);
+  const [shortlistAllLoading, setShortlistAllLoading] = useState(false);
   
   const downloadCV = (application) => {
     if (!application.cvUrl) {
@@ -104,13 +105,48 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
    };
 
   const handleCloseApplication = async () => {
-    if (!window.confirm('Are you sure you want to close applications for this job? This will prevent new applications.')) {
+    // Show confirmation dialog
+    const result = await Swal.fire({
+      title: 'Close Applications?',
+      html: `
+        <div class="text-left">
+          <p class="mb-3">You are about to close applications for this job.</p>
+          <p class="text-sm text-gray-600 mb-2">This will:</p>
+          <ul class="text-sm text-gray-600 list-disc list-inside space-y-1 mb-3">
+            <li>Prevent new applications from being submitted</li>
+            <li>Keep existing applications unchanged</li>
+          </ul>
+          <p class="text-sm font-semibold text-gray-800">You can still manage existing applications.</p>
+        </div>
+      `,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Close Applications',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#dc2626',
+      cancelButtonColor: '#6b7280',
+      reverseButtons: true,
+      focusConfirm: false,
+      allowOutsideClick: false,
+    });
+
+    if (!result.isConfirmed) {
       setConfirmClose(false);
       return;
     }
 
     setCloseLoading(true);
     setActionMessage(null);
+    
+    // Show loading state
+    Swal.fire({
+      title: 'Closing...',
+      text: 'Please wait',
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading();
+      }
+    });
     
     try {
       const res = await fetch(
@@ -125,26 +161,120 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       
       const json = await res.json();
       if (res.ok) {
-        setActionMessage({
-          type: 'success',
-          text: json.message || 'Applications closed successfully',
-        });
         setJobStatus('CLOSED');
         await fetchApplications();
+        
+        Swal.fire({
+          icon: 'success',
+          title: 'Applications Closed',
+          text: json.message || 'Applications have been closed successfully',
+          confirmButtonColor: '#2563eb',
+        });
       } else {
-        setActionMessage({
-          type: 'error',
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed to Close',
           text: json.message || 'Failed to close applications',
+          confirmButtonColor: '#2563eb',
         });
       }
     } catch (err) {
-      setActionMessage({ 
-        type: 'error', 
-        text: `Error: ${err.message}` 
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: err.message || 'An error occurred',
+        confirmButtonColor: '#2563eb',
       });
     } finally {
       setCloseLoading(false);
       setConfirmClose(false);
+    }
+  };
+
+  const handleShortlistAll = async () => {
+    // Show confirmation dialog
+    const result = await Swal.fire({
+      title: 'Shortlist All Applicants?',
+      html: `
+        <div class="text-left">
+          <p class="mb-3">You are about to shortlist <strong>all ${applications.length} applicants</strong> for this job.</p>
+          <p class="text-sm text-gray-600 mb-2">This will:</p>
+          <ul class="text-sm text-gray-600 list-disc list-inside space-y-1 mb-3">
+            <li>Mark all applicants as <strong>SHORTLISTED</strong></li>
+            <li>Close the job for new applications</li>
+            <li>Send notifications to all shortlisted students</li>
+          </ul>
+          <p class="text-sm font-semibold text-gray-800">This action cannot be undone.</p>
+        </div>
+      `,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Shortlist All',
+      cancelButtonText: 'Cancel',
+      confirmButtonColor: '#2563eb',
+      cancelButtonColor: '#6b7280',
+      reverseButtons: true,
+      focusConfirm: false,
+      allowOutsideClick: false,
+    });
+
+    if (!result.isConfirmed) {
+      return;
+    }
+
+    setShortlistAllLoading(true);
+    setActionMessage(null);
+    
+    // Show loading state
+    Swal.fire({
+      title: 'Shortlisting...',
+      text: `Processing ${applications.length} applicants`,
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading();
+      }
+    });
+
+    try {
+      const res = await fetch(`http://localhost:5000/api/jobs/${jobId}/shortlist-all`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      const json = await res.json();
+      
+      if (res.ok) {
+        await fetchApplications();
+        setJobStatus('CLOSED');
+        setConfirmShortlistAll(false);
+        
+        Swal.fire({
+          icon: 'success',
+          title: 'Shortlisting Complete!',
+          html: `
+            <p class="mb-2">Successfully shortlisted <strong>${json.data?.shortlisted || 0} applicants</strong>.</p>
+            <p class="text-sm text-gray-600">All students have been notified and can proceed to the next round.</p>
+          `,
+          confirmButtonColor: '#2563eb',
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'Shortlisting Failed',
+          text: json.message || 'Failed to shortlist all applicants',
+          confirmButtonColor: '#2563eb',
+        });
+      }
+    } catch (err) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: err.message || 'An error occurred while shortlisting',
+        confirmButtonColor: '#2563eb',
+      });
+    } finally {
+      setShortlistAllLoading(false);
     }
   };
 
@@ -250,35 +380,27 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                   )}
                   {jobStatus === 'OPEN' && (
                     <button
-                      onClick={() => setConfirmClose(true)}
+                      onClick={handleShortlistAll}
+                      disabled={shortlistAllLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Shortlist All Applicants (No Resume Required)"
+                    >
+                      <User className="w-4 h-4" />
+                      {shortlistAllLoading ? 'Shortlisting...' : 'Shortlist All'}
+                    </button>
+                  )}
+                  {jobStatus === 'OPEN' && (
+                <button
+                      onClick={handleCloseApplication}
                       disabled={closeLoading}
                       className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Manually Close Applications"
                     >
                       <XCircle className="w-4 h-4" />
                       {closeLoading ? 'Closing...' : 'Close Applications'}
-                    </button>
+                </button>
                   )}
                 </>
-              )}
-              {confirmClose && jobStatus === 'OPEN' && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-700">Close applications?</span>
-                  <button
-                    onClick={handleCloseApplication}
-                    className="btn btn-primary"
-                    disabled={closeLoading}
-                  >
-                    {closeLoading ? 'Closing...' : 'Confirm'}
-                  </button>
-                  <button
-                    onClick={() => setConfirmClose(false)}
-                    className="btn btn-ghost"
-                    disabled={closeLoading}
-                  >
-                    Cancel
-                  </button>
-                </div>
               )}
               {confirming && jobStatus === 'OPEN' && (
                 <div className="flex items-center gap-2">

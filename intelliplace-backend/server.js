@@ -7,6 +7,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import jobsRoutes from './routes/jobs.js';
 import notificationsRoutes from './routes/notifications.js';
 import applicationsRoutes from './routes/applications.js';
+import codingTestsRoutes from './routes/codingTests.js';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 
@@ -34,6 +35,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/applications', applicationsRoutes);
+app.use('/api/jobs', codingTestsRoutes);
 
 // Health check
 app.get('/api/health', async (req, res) => {

@@ -3,9 +3,10 @@ import Navbar from '../../components/Navbar';
 import CvPreviewModal from '../../components/CvPreviewModal';
 import Modal from '../../components/Modal';
 import StudentTakeTest from '../../components/StudentTakeTest';
+import StudentTakeCodingTest from '../../components/StudentTakeCodingTest';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentUser } from '../../utils/auth';
-import { Play } from 'lucide-react';
+import { Play, Code, RefreshCw } from 'lucide-react';
 
 const MyApplications = () => {
   const navigate = useNavigate();
@@ -16,17 +17,13 @@ const MyApplications = () => {
   const [modal, setModal] = useState(null);
   const [notice, setNotice] = useState(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
+  const [isCodingTestOpen, setIsCodingTestOpen] = useState(false);
   const [testJobId, setTestJobId] = useState(null);
   const [testStatuses, setTestStatuses] = useState({}); // jobId -> test status
+  const [codingTestStatuses, setCodingTestStatuses] = useState({}); // jobId -> coding test status
 
-  useEffect(() => {
-    const currentUser = getCurrentUser();
-    if (!currentUser || currentUser.userType !== 'student') {
-      navigate('/student/login');
-      return;
-    }
-
-    const fetchApplications = async () => {
+  // Fetch applications and test statuses
+  const fetchApplications = async () => {
       setLoading(true);
       try {
         const res = await fetch('http://localhost:5000/api/jobs/my-applications', {
@@ -43,8 +40,10 @@ const MyApplications = () => {
             .map(app => app.jobId);
           
           const testStatusMap = {};
+          const codingTestStatusMap = {};
           for (const jobId of shortlistedJobs) {
             try {
+              // Fetch aptitude test status
               const testRes = await fetch(`http://localhost:5000/api/jobs/${jobId}/aptitude-test/status`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
               });
@@ -54,19 +53,97 @@ const MyApplications = () => {
                   testStatusMap[jobId] = testJson.data.test.status;
                 }
               }
+              
+              // Fetch coding test status - use simpler status endpoint
+              try {
+                const codingTestRes = await fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test/status`, {
+                  headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (codingTestRes.ok) {
+                  const codingTestJson = await codingTestRes.json();
+                  if (codingTestJson.data?.exists && codingTestJson.data?.status) {
+                    codingTestStatusMap[jobId] = codingTestJson.data.status;
+                    console.log(`Coding test for job ${jobId}: status = ${codingTestJson.data.status}, available = ${codingTestJson.data.available}`);
+                  }
+                }
+              } catch (codingErr) {
+                // Test might not exist, which is fine
+                console.log(`Coding test status check for job ${jobId}:`, codingErr.message);
+              }
             } catch (err) {
               console.error(`Error fetching test status for job ${jobId}:`, err);
             }
           }
           setTestStatuses(testStatusMap);
+          setCodingTestStatuses(codingTestStatusMap);
+          
+          // Debug logging
+          console.log('Test statuses:', testStatusMap);
+          console.log('Coding test statuses:', codingTestStatusMap);
         }
       } catch (err) {
         console.error(err);
       } finally { setLoading(false); }
-    };
+  };
+
+  useEffect(() => {
+    const currentUser = getCurrentUser();
+    if (!currentUser || currentUser.userType !== 'student') {
+      navigate('/student/login');
+      return;
+    }
 
     fetchApplications();
+    
+    // Auto-refresh every 30 seconds to check for new tests
+    const refreshInterval = setInterval(() => {
+      fetchApplications();
+    }, 30000);
+    
+    return () => clearInterval(refreshInterval);
   }, [navigate]);
+  
+  // Check if we need to open a coding test from notification
+  useEffect(() => {
+    const openCodingTestJobId = sessionStorage.getItem('openCodingTest');
+    if (openCodingTestJobId && applications.length > 0) {
+      // Clear the flag immediately
+      sessionStorage.removeItem('openCodingTest');
+      
+      const jobId = parseInt(openCodingTestJobId);
+      
+      // Check if student has a shortlisted application for this job
+      const app = applications.find(a => a.jobId === jobId && a.status === 'SHORTLISTED');
+      
+      if (app) {
+        // Check if coding test is available
+        const checkAndOpen = async () => {
+          try {
+            const codingTestRes = await fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test/status`, {
+              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            });
+            
+            if (codingTestRes.ok) {
+              const codingTestJson = await codingTestRes.json();
+              if (codingTestJson.data?.exists && codingTestJson.data?.status === 'STARTED' && codingTestJson.data?.available) {
+                // Open the coding test modal
+                setTestJobId(jobId);
+                setIsCodingTestOpen(true);
+              }
+            }
+          } catch (err) {
+            console.error('Failed to check coding test availability:', err);
+          }
+        };
+        
+        // Small delay to ensure UI is ready
+        setTimeout(checkAndOpen, 500);
+      }
+    }
+  }, [applications]); // Run when applications are loaded or updated
+  
+  // Manual refresh function (reuses the same logic)
+  const handleRefresh = fetchApplications;
 
   const viewCV = async (cvUrl) => {
     if (!cvUrl) return;
@@ -97,7 +174,18 @@ const MyApplications = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       <Navbar />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <h1 className="text-2xl font-bold mb-4">My Applications</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">My Applications</h1>
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Refresh to check for new tests"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
 
         {notice && (
           <div className={`p-3 mb-4 rounded ${notice.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
@@ -177,8 +265,29 @@ const MyApplications = () => {
                       className="flex items-center gap-2 px-3 py-1 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
                     >
                       <Play className="w-4 h-4" />
-                      Start Test
+                      Start Aptitude Test
                     </button>
+                  )}
+                  
+                  {app.status === 'SHORTLISTED' && codingTestStatuses[app.jobId] && (
+                    <>
+                      {codingTestStatuses[app.jobId] === 'STARTED' ? (
+                        <button
+                          onClick={() => {
+                            setTestJobId(app.jobId);
+                            setIsCodingTestOpen(true);
+                          }}
+                          className="flex items-center gap-2 px-3 py-1 bg-purple-600 text-white rounded-md text-sm hover:bg-purple-700"
+                        >
+                          <Code className="w-4 h-4" />
+                          Start Coding Test
+                        </button>
+                      ) : (
+                        <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-md text-sm">
+                          Coding Test: {codingTestStatuses[app.jobId]}
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -217,6 +326,26 @@ const MyApplications = () => {
               const json = await res.json();
               if (res.ok) setApplications(json.data.applications || []);
               setNotice({ type: 'success', text: 'Test submitted. Your application status may have updated.' });
+            } catch (err) {
+              console.error('Failed to refresh applications after submission', err);
+            }
+          })();
+        }}
+      />
+
+      {/* Student Take Coding Test Modal */}
+      <StudentTakeCodingTest
+        isOpen={isCodingTestOpen}
+        onClose={() => { setIsCodingTestOpen(false); setTestJobId(null); }}
+        jobId={testJobId}
+        onSubmitted={() => {
+          // Refresh applications to pick up status changes
+          (async () => {
+            try {
+              const res = await fetch('http://localhost:5000/api/jobs/my-applications', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+              const json = await res.json();
+              if (res.ok) setApplications(json.data.applications || []);
+              setNotice({ type: 'success', text: 'Coding test submitted. Your application status may have updated.' });
             } catch (err) {
               console.error('Failed to refresh applications after submission', err);
             }

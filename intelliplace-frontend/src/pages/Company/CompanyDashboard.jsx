@@ -14,6 +14,7 @@ import Navbar from '../../components/Navbar';
 import { getCurrentUser } from '../../utils/auth';
 import CompanyPostJob from '../../components/CompanyPostJob';
 import CompanyCreateTest from '../../components/CompanyCreateTest';
+import CompanyCreateCodingTest from '../../components/CompanyCreateCodingTest';
 import CompanyViewTest from '../../components/CompanyViewTest';
 import Modal from '../../components/Modal';
 
@@ -66,8 +67,12 @@ const CompanyDashboard = () => {
   const [selectedJobStatus, setSelectedJobStatus] = useState(null);
   const [isPostJobOpen, setIsPostJobOpen] = useState(false);
   const [isCreateTestOpen, setIsCreateTestOpen] = useState(false);
+  const [isCreateCodingTestOpen, setIsCreateCodingTestOpen] = useState(false);
+  const [isEditCodingTestOpen, setIsEditCodingTestOpen] = useState(false);
+  const [editingCodingTestJobId, setEditingCodingTestJobId] = useState(null);
   const [testJobId, setTestJobId] = useState(null);
   const [testsMap, setTestsMap] = useState({});
+  const [codingTestsMap, setCodingTestsMap] = useState({});
   const [isViewTestOpen, setIsViewTestOpen] = useState(false);
   const [viewTestJobId, setViewTestJobId] = useState(null);
   const [isStartConfirmOpen, setIsStartConfirmOpen] = useState(false);
@@ -95,20 +100,46 @@ const CompanyDashboard = () => {
         try {
           const tokens = myJobs.map(async job => {
             try {
+              // Fetch aptitude test
               const r = await fetch(`http://localhost:5000/api/jobs/${job.id}/aptitude-test`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
               });
-              if (!r.ok) return { jobId: job.id, test: null };
-              const d = await r.json();
-              return { jobId: job.id, test: d.data.test };
+              
+              // Fetch coding test
+              const codingR = await fetch(`http://localhost:5000/api/jobs/${job.id}/coding-test`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+              });
+              
+              let aptitudeTest = null;
+              if (r.ok) {
+                const aptitudeData = await r.json();
+                aptitudeTest = aptitudeData.data?.test || aptitudeData.data;
+              }
+              
+              let codingTest = null;
+              if (codingR.ok) {
+                const codingData = await codingR.json();
+                codingTest = codingData.data;
+              }
+              
+              return { 
+                jobId: job.id, 
+                aptitudeTest,
+                codingTest
+              };
             } catch (err) {
-              return { jobId: job.id, test: null };
+              return { jobId: job.id, aptitudeTest: null, codingTest: null };
             }
           });
           const results = await Promise.all(tokens);
-          const map = {};
-          results.forEach(r => { if (r && r.test) map[r.jobId] = r.test; });
-          setTestsMap(map);
+          const aptitudeMap = {};
+          const codingMap = {};
+          results.forEach(r => {
+            if (r && r.aptitudeTest) aptitudeMap[r.jobId] = r.aptitudeTest;
+            if (r && r.codingTest) codingMap[r.jobId] = r.codingTest;
+          });
+          setTestsMap(aptitudeMap);
+          setCodingTestsMap(codingMap);
         } catch (e) {
           console.error('Failed to fetch tests for jobs:', e);
         }
@@ -136,16 +167,27 @@ const CompanyDashboard = () => {
     setStartLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:5000/api/jobs/${startingJob.id}/aptitude-test/start`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const isCoding = startingJob.isCoding;
+      const endpoint = isCoding
+        ? `http://localhost:5000/api/jobs/${startingJob.id}/coding-test/start`
+        : `http://localhost:5000/api/jobs/${startingJob.id}/aptitude-test/start`;
+      
+      const res = await fetch(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
       const d = await res.json();
       if (!res.ok) {
         alert(d.message || 'Failed to start test');
       } else {
-        setTestsMap(prev => ({ ...prev, [startingJob.id]: d.data.test }));
-        setJobs(prev => prev.map(j => j.id === startingJob.id ? { ...j, status: d.data.job?.status || 'CLOSED' } : j));
-        alert(`Test started — ${d.data.invited || 0} shortlisted students notified`);
+        if (isCoding) {
+          setCodingTestsMap(prev => ({ ...prev, [startingJob.id]: d.data }));
+        } else {
+          setTestsMap(prev => ({ ...prev, [startingJob.id]: d.data.test }));
+          setJobs(prev => prev.map(j => j.id === startingJob.id ? { ...j, status: d.data.job?.status || 'CLOSED' } : j));
+        }
+        alert(`Test started${!isCoding ? ` — ${d.data.invited || 0} shortlisted students notified` : ''}`);
         setIsStartConfirmOpen(false);
         setStartingJob(null);
+        // Refresh jobs to update test status
+        if (user) fetchJobs(user.id);
       }
     } catch (err) {
       console.error('Failed to start test:', err);
@@ -160,15 +202,26 @@ const CompanyDashboard = () => {
     setStopLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:5000/api/jobs/${stoppingJob.id}/aptitude-test/stop`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const isCoding = stoppingJob.isCoding;
+      const endpoint = isCoding
+        ? `http://localhost:5000/api/jobs/${stoppingJob.id}/coding-test/stop`
+        : `http://localhost:5000/api/jobs/${stoppingJob.id}/aptitude-test/stop`;
+      
+      const res = await fetch(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
       const d = await res.json();
       if (!res.ok) {
         alert(d.message || 'Failed to stop test');
       } else {
-        setTestsMap(prev => ({ ...prev, [stoppingJob.id]: d.data.test }));
+        if (isCoding) {
+          setCodingTestsMap(prev => ({ ...prev, [stoppingJob.id]: d.data }));
+        } else {
+          setTestsMap(prev => ({ ...prev, [stoppingJob.id]: d.data.test }));
+        }
         alert('Test stopped successfully');
         setIsStopConfirmOpen(false);
         setStoppingJob(null);
+        // Refresh jobs to update test status
+        if (user) fetchJobs(user.id);
       }
     } catch (err) {
       console.error('Failed to stop test:', err);
@@ -295,6 +348,52 @@ const CompanyDashboard = () => {
           }}
         />
 
+        <CompanyCreateCodingTest
+          isOpen={isCreateCodingTestOpen}
+          onClose={() => { setIsCreateCodingTestOpen(false); setTestJobId(null); }}
+          jobId={testJobId}
+          onCreated={async () => {
+            setIsCreateCodingTestOpen(false);
+            setTestJobId(null);
+            // Refresh coding tests map for that job
+            try {
+              const r = await fetch(`http://localhost:5000/api/jobs/${testJobId}/coding-test`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+              if (r.ok) {
+                const d = await r.json();
+                setCodingTestsMap(prev => ({ ...prev, [testJobId]: d.data }));
+              }
+            } catch (err) {
+              console.error('Failed to refresh coding test after creation:', err);
+            }
+            // Refresh jobs to show updated info
+            if (user) fetchJobs(user.id);
+          }}
+        />
+        
+        <CompanyCreateCodingTest
+          isOpen={isEditCodingTestOpen}
+          onClose={() => { setIsEditCodingTestOpen(false); setEditingCodingTestJobId(null); }}
+          jobId={editingCodingTestJobId}
+          editingTest={true}
+          onCreated={async () => {
+            setIsEditCodingTestOpen(false);
+            const editedJobId = editingCodingTestJobId;
+            setEditingCodingTestJobId(null);
+            // Refresh coding tests map for that job
+            try {
+              const r = await fetch(`http://localhost:5000/api/jobs/${editedJobId}/coding-test`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+              if (r.ok) {
+                const d = await r.json();
+                setCodingTestsMap(prev => ({ ...prev, [editedJobId]: d.data }));
+              }
+            } catch (err) {
+              console.error('Failed to refresh coding test after edit:', err);
+            }
+            // Refresh jobs to show updated info
+            if (user) fetchJobs(user.id);
+          }}
+        />
+
         <CompanyViewTest
           isOpen={isViewTestOpen}
           onClose={() => { setIsViewTestOpen(false); setViewTestJobId(null); }}
@@ -304,8 +403,10 @@ const CompanyDashboard = () => {
 
         <Modal
           open={isStartConfirmOpen}
-          title={`Start test for ${startingJob?.title || ''}`}
-          message={`Starting the test will close applications for this job and notify all shortlisted students. Continue?`}
+          title={`Start ${startingJob?.isCoding ? 'Coding' : 'Aptitude'} Test for ${startingJob?.title || ''}`}
+          message={startingJob?.isCoding 
+            ? `Starting the coding test will allow students to take the test. Continue?`
+            : `Starting the test will close applications for this job and notify all shortlisted students. Continue?`}
           type="warning"
           onClose={() => setIsStartConfirmOpen(false)}
           actions={[
@@ -425,6 +526,28 @@ const CompanyDashboard = () => {
                             }
                           </div>
                         )}
+                        
+                        {/* Test Status Badges */}
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {testsMap[job.id] && (
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              testsMap[job.id].status === 'STARTED' ? 'bg-green-100 text-green-800' :
+                              testsMap[job.id].status === 'CREATED' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              Aptitude: {testsMap[job.id].status}
+                            </span>
+                          )}
+                          {codingTestsMap[job.id] && (
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              codingTestsMap[job.id].status === 'STARTED' ? 'bg-green-100 text-green-800' :
+                              codingTestsMap[job.id].status === 'CREATED' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              Coding: {codingTestsMap[job.id].status}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -466,12 +589,73 @@ const CompanyDashboard = () => {
                             )}
                           </>
                         ) : (
-                          <button
-                            onClick={() => { setIsCreateTestOpen(true); setTestJobId(job.id); }}
-                            className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
-                          >
-                            Create Aptitude Test
-                          </button>
+                          <>
+                            <button
+                              onClick={() => { setIsCreateTestOpen(true); setTestJobId(job.id); }}
+                              className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                            >
+                              Create Aptitude Test
+                            </button>
+                            {!codingTestsMap[job.id] && (
+                              <button
+                                onClick={() => { setIsCreateCodingTestOpen(true); setTestJobId(job.id); }}
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
+                              >
+                                Create Coding Test
+                              </button>
+                            )}
+                          </>
+                        )}
+                        
+                        {/* Coding Test Controls */}
+                        {codingTestsMap[job.id] && (
+                          <>
+                            {codingTestsMap[job.id].status === 'CREATED' && (
+                              <>
+                                <button
+                                  onClick={() => { setIsStartConfirmOpen(true); setStartingJob({ ...job, isCoding: true }); }}
+                                  className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                                >
+                                  Start Coding Test
+                                </button>
+                                <button
+                                  onClick={() => { setEditingCodingTestJobId(job.id); setIsEditCodingTestOpen(true); }}
+                                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                                >
+                                  Edit Test
+                                </button>
+                              </>
+                            )}
+                            {codingTestsMap[job.id].status === 'STARTED' && (
+                              <>
+                                <button
+                                  onClick={() => { setIsStopConfirmOpen(true); setStoppingJob({ ...job, isCoding: true }); }}
+                                  className="inline-flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+                                >
+                                  Stop Test
+                                </button>
+                                <span className="px-3 py-2 bg-green-100 text-green-800 rounded-lg text-sm font-medium">
+                                  Coding Test Active
+                                </span>
+                              </>
+                            )}
+                            {codingTestsMap[job.id].status === 'STOPPED' && (
+                              <>
+                                <button
+                                  onClick={() => { setIsStartConfirmOpen(true); setStartingJob({ ...job, isCoding: true }); }}
+                                  className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                                >
+                                  Restart Test
+                                </button>
+                                <button
+                                  onClick={() => { setEditingCodingTestJobId(job.id); setIsEditCodingTestOpen(true); }}
+                                  className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                                >
+                                  Edit Test
+                                </button>
+                              </>
+                            )}
+                          </>
                         )}
 
                         <button

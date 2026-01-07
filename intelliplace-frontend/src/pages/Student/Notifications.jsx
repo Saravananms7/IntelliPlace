@@ -36,7 +36,30 @@ const Notifications = () => {
     };
 
     fetchNotifications();
+    
+    // Auto-refresh notifications every 30 seconds
+    const refreshInterval = setInterval(() => {
+      fetchNotifications();
+    }, 30000);
+    
+    return () => clearInterval(refreshInterval);
   }, [navigate]);
+  
+  // Manual refresh function
+  const handleRefresh = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('http://localhost:5000/api/notifications', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      const json = await res.json();
+      if (res.ok) setNotifications(json.data.notifications || []);
+    } catch (err) {
+      console.error('Failed to refresh notifications:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const markReadAndOpen = async (notif) => {
     try {
@@ -50,13 +73,34 @@ const Notifications = () => {
       setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
 
       const payload = json.data || {};
+      
+      // Check if this is a coding test notification
+      const isCodingTestNotification = notif.title && notif.title.toLowerCase().includes('coding test');
+      
       if (payload.application) {
-        // application details are shown inline on the applications page now
+        // If it's a coding test notification, navigate with a flag to open the test
+        if (isCodingTestNotification && payload.application.jobId) {
+          // Store the jobId in sessionStorage so the applications page can detect it
+          sessionStorage.setItem('openCodingTest', payload.application.jobId.toString());
+        }
         navigate('/student/applications');
         return;
       }
       if (payload.job) {
-        navigate(`/jobs/${payload.job.id}`);
+        // If it's a coding test notification, navigate with a flag to open the test
+        if (isCodingTestNotification && payload.job.id) {
+          sessionStorage.setItem('openCodingTest', payload.job.id.toString());
+          navigate('/student/applications');
+        } else {
+          navigate(`/jobs/${payload.job.id}`);
+        }
+        return;
+      }
+
+      // Fallback: if it's a coding test notification with jobId, navigate to applications
+      if (isCodingTestNotification && notif.jobId) {
+        sessionStorage.setItem('openCodingTest', notif.jobId.toString());
+        navigate('/student/applications');
         return;
       }
 
@@ -66,9 +110,19 @@ const Notifications = () => {
       console.error('Failed to open notification', err);
       // fallback behavior
       try { setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n)); } catch(e){}
-  if (notif.applicationId) navigate('/student/applications');
-  else if (notif.jobId) navigate(`/jobs/${notif.jobId}`);
-      else navigate('/student/applications');
+      
+      // Check if it's a coding test notification
+      const isCodingTestNotification = notif.title && notif.title.toLowerCase().includes('coding test');
+      if (isCodingTestNotification && notif.jobId) {
+        sessionStorage.setItem('openCodingTest', notif.jobId.toString());
+        navigate('/student/applications');
+      } else if (notif.applicationId) {
+        navigate('/student/applications');
+      } else if (notif.jobId) {
+        navigate(`/jobs/${notif.jobId}`);
+      } else {
+        navigate('/student/applications');
+      }
     }
   };
 
@@ -103,7 +157,15 @@ const Notifications = () => {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">Notifications</h1>
-          <div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className="px-3 py-1 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              title="Refresh notifications"
+            >
+              Refresh
+            </button>
 
         {notice && (
           <div className={`p-3 mb-4 rounded ${notice.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>

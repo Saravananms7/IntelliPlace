@@ -39,6 +39,12 @@ JWT_SECRET=your_super_secret_jwt_key_change_this_in_production_min_32_chars
 
 # Frontend URL
 FRONTEND_URL=http://localhost:5173
+
+# Judge0 API URL (for coding tests)
+# Default: http://localhost:2358 (for self-hosted Judge0)
+# For RapidAPI: https://judge0.p.rapidapi.com (requires JUDGE0_API_KEY)
+JUDGE0_API_URL=http://localhost:2358
+# JUDGE0_API_KEY=your-api-key-here  # Optional, only if using RapidAPI
 ```
 
 **Generate JWT_SECRET:**

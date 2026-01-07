@@ -158,6 +158,31 @@ router.get('/company/stats/:companyId', async (req, res) => {
   try {
     const { companyId } = req.params;
 
+    // Test database connection first
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch (dbError) {
+      console.error('Database connection error:', dbError);
+      if (dbError.code === 'P1001') {
+        return res.status(503).json({
+          success: false,
+          message: 'Database connection failed. Please check:',
+          error: {
+            code: dbError.code,
+            details: [
+              '1. Verify your DATABASE_URL in .env file',
+              '2. Check if Neon database is active (it may be paused)',
+              '3. Visit Neon Console to wake up the database if paused',
+              '4. Verify network connectivity',
+              '5. Check if database credentials are correct'
+            ],
+            host: dbError.meta?.database_host || 'unknown'
+          }
+        });
+      }
+      throw dbError;
+    }
+
     const jobsPosted = await prisma.job.count({
       where: { companyId: parseInt(companyId) },
     });
@@ -188,7 +213,30 @@ router.get('/company/stats/:companyId', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching company stats:', error);
-    res.status(500).json({ success: false, message: 'Server error fetching stats' });
+    
+    // Provide more specific error messages
+    if (error.code === 'P1001') {
+      return res.status(503).json({
+        success: false,
+        message: 'Cannot connect to database server',
+        error: {
+          code: error.code,
+          message: 'The database server is unreachable. This usually means:',
+          troubleshooting: [
+            'Neon databases pause after inactivity - check Neon Console',
+            'Verify DATABASE_URL in .env file is correct',
+            'Check network connectivity',
+            'Ensure database credentials are valid'
+          ]
+        }
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error fetching stats',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

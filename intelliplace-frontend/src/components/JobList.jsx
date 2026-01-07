@@ -22,6 +22,7 @@ const JobList = () => {
   const [applyState, setApplyState] = useState({ cgpa: '', backlog: '', cv: null });
   const [message, setMessage] = useState(null);
   const [appliedJobs, setAppliedJobs] = useState(new Set());
+  const [applicationStatuses, setApplicationStatuses] = useState({}); // jobId -> { status, decisionReason }
   const [previewJobDesc, setPreviewJobDesc] = useState(null);
   const [eligibilityError, setEligibilityError] = useState(null);
 
@@ -40,8 +41,19 @@ const JobList = () => {
 
       if (applicationsRes.ok) {
         const appJson = await applicationsRes.json();
-        const appliedIds = new Set((appJson.data?.applications || []).map(app => app.jobId));
+        const applications = appJson.data?.applications || [];
+        const appliedIds = new Set(applications.map(app => app.jobId));
         setAppliedJobs(appliedIds);
+        
+        // Store application statuses for each job
+        const statusMap = {};
+        applications.forEach(app => {
+          statusMap[app.jobId] = {
+            status: app.status,
+            decisionReason: app.decisionReason
+          };
+        });
+        setApplicationStatuses(statusMap);
       }
     } catch (err) {
       console.error(err);
@@ -155,7 +167,7 @@ const JobList = () => {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-      }
+  }
     } catch (err) {
       console.error('Failed to open job description file:', err);
       alert('Failed to open job description file. Please try again.');
@@ -242,19 +254,51 @@ const JobList = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className={`card ${
-                  isApplied ? 'border-green-500 bg-green-50/30' : 'hover:shadow-md'
+                  applicationStatuses[job.id]?.status === 'SHORTLISTED' 
+                    ? 'border-green-500 bg-green-50/30' 
+                    : applicationStatuses[job.id]?.status === 'REJECTED'
+                    ? 'border-red-500 bg-red-50/30'
+                    : applicationStatuses[job.id]?.status === 'HIRED'
+                    ? 'border-blue-500 bg-blue-50/30'
+                    : applicationStatuses[job.id]?.status === 'OFFERED'
+                    ? 'border-purple-500 bg-purple-50/30'
+                    : isApplied 
+                    ? 'border-green-500 bg-green-50/30' 
+                    : 'hover:shadow-md'
                 }`}
               >
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
                   <div className="flex-grow">
-                    <div className="flex items-center gap-3 mb-3">
+                    <div className="flex items-center gap-3 mb-3 flex-wrap">
                       <h3 className="text-xl font-semibold text-gray-900">{job.title}</h3>
                       {isApplied && (
                         <span className="px-2.5 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
                           Applied
                         </span>
                       )}
+                      {applicationStatuses[job.id] && (
+                        <span className={`px-3 py-1 text-xs font-medium rounded-full ${
+                          applicationStatuses[job.id].status === 'SHORTLISTED' 
+                            ? 'bg-green-100 text-green-800 border border-green-300' 
+                            : applicationStatuses[job.id].status === 'REJECTED'
+                            ? 'bg-red-100 text-red-800 border border-red-300'
+                            : applicationStatuses[job.id].status === 'HIRED'
+                            ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                            : applicationStatuses[job.id].status === 'OFFERED'
+                            ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                            : 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                        }`}>
+                          {applicationStatuses[job.id].status}
+                        </span>
+                      )}
                     </div>
+                    {applicationStatuses[job.id]?.decisionReason && (
+                      <div className="mb-3 p-2 bg-gray-50 rounded-md border border-gray-200">
+                        <p className="text-sm text-gray-700">
+                          <span className="font-medium">Status Reason:</span> {applicationStatuses[job.id].decisionReason}
+                        </p>
+                    </div>
+                    )}
                     
                     <div className="mb-4">
                       <p className="text-gray-600">{job.description}</p>
@@ -366,18 +410,35 @@ const JobList = () => {
                           <FileText className="w-4 h-4" />
                           View Job Description File
                         </button>
-                      </div>
+                    </div>
                     )}
                   </div>
 
                   <div className="flex flex-col gap-2 md:w-48">
                     {isApplied ? (
+                      <div className="flex flex-col gap-2">
                       <button
                         disabled
                         className="btn bg-green-100 text-green-700 disabled:opacity-60 cursor-not-allowed w-full"
                       >
                         Applied ✓
-                      </button>
+                        </button>
+                        {applicationStatuses[job.id]?.status && (
+                          <div className={`px-3 py-2 rounded-md text-center text-sm font-medium ${
+                            applicationStatuses[job.id].status === 'SHORTLISTED' 
+                              ? 'bg-green-50 text-green-700 border border-green-200' 
+                              : applicationStatuses[job.id].status === 'REJECTED'
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : applicationStatuses[job.id].status === 'HIRED'
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : applicationStatuses[job.id].status === 'OFFERED'
+                              ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                              : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                          }`}>
+                            Status: {applicationStatuses[job.id].status}
+                          </div>
+                        )}
+                      </div>
                     ) : !canApply ? (
                       <button
                         disabled
@@ -438,22 +499,22 @@ const JobList = () => {
 
               <form onSubmit={submitApplication} className="space-y-4">
                 {selectedJob.includeCgpaInShortlisting !== false && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                       Your CGPA <span className="text-red-500">*</span>
                       {selectedJob.minCgpa && (
                         <span className="text-xs text-gray-500 ml-2">(Required: {selectedJob.minCgpa}+)</span>
                       )}
-                    </label>
-                    <input
-                      name="cgpa"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="10"
-                      value={applyState.cgpa}
-                      onChange={handleApplyChange}
-                      placeholder="Enter your CGPA"
+                  </label>
+                  <input
+                    name="cgpa"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="10"
+                    value={applyState.cgpa}
+                    onChange={handleApplyChange}
+                    placeholder="Enter your CGPA"
                       required
                       className="input"
                     />
@@ -473,9 +534,9 @@ const JobList = () => {
                       value={applyState.cgpa}
                       onChange={handleApplyChange}
                       placeholder="Enter your CGPA (optional)"
-                      className="input"
-                    />
-                  </div>
+                    className="input"
+                  />
+                </div>
                 )}
 
                 <div>
