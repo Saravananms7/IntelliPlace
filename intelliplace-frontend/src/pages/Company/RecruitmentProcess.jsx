@@ -13,6 +13,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  Video,
 } from 'lucide-react';
 import Navbar from '../../components/Navbar';
 import { getCurrentUser } from '../../utils/auth';
@@ -25,10 +26,11 @@ const RecruitmentProcess = () => {
   const navigate = useNavigate();
   const { jobId } = useParams();
   const user = getCurrentUser();
-  const [activeTab, setActiveTab] = useState('aptitude'); // 'aptitude' or 'coding'
+  const [activeTab, setActiveTab] = useState('aptitude'); // 'aptitude', 'coding', or 'interview'
   const [job, setJob] = useState(null);
   const [aptitudeTest, setAptitudeTest] = useState(null);
   const [codingTest, setCodingTest] = useState(null);
+  const [interviews, setInterviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const isFetchingRef = useRef(false);
   
@@ -127,6 +129,32 @@ const RecruitmentProcess = () => {
           console.error('Error fetching coding test:', err);
         }
         setCodingTest(null);
+      }
+
+      // Fetch interviews
+      try {
+        const interviewsRes = await fetch(
+          `http://localhost:5000/api/jobs/${jobId}/interviews`,
+          {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+          }
+        );
+        if (interviewsRes.ok) {
+          const interviewsData = await interviewsRes.json();
+          setInterviews(interviewsData.data?.interviews || interviewsData.data || []);
+        } else if (interviewsRes.status === 404) {
+          // 404 means no interviews exist - this is normal, not an error
+          setInterviews([]);
+        } else {
+          // Other error statuses - only log if not 404
+          setInterviews([]);
+        }
+      } catch (err) {
+        // Network errors or other exceptions - only log real errors
+        if (err.name !== 'TypeError' || !err.message.includes('404')) {
+          console.error('Error fetching interviews:', err);
+        }
+        setInterviews([]);
       }
     } catch (err) {
       console.error('Unexpected error:', err);
@@ -324,6 +352,19 @@ const RecruitmentProcess = () => {
                 Coding Test
               </div>
             </button>
+            <button
+              onClick={() => setActiveTab('interview')}
+              className={`flex-1 px-6 py-4 text-center font-medium transition-colors ${
+                activeTab === 'interview'
+                  ? 'text-green-600 border-b-2 border-green-600 bg-green-50'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <Video className="w-5 h-5" />
+                Interview
+              </div>
+            </button>
           </div>
 
           {/* Tab Content */}
@@ -342,7 +383,7 @@ const RecruitmentProcess = () => {
                 }}
                 onView={() => setIsViewTestOpen(true)}
               />
-            ) : (
+            ) : activeTab === 'coding' ? (
               <CodingTestContent
                 test={codingTest}
                 onCreate={() => setIsCreateCodingOpen(true)}
@@ -359,6 +400,12 @@ const RecruitmentProcess = () => {
                   setTestToStart({ type: 'coding' });
                   setIsStartConfirmOpen(true);
                 }}
+              />
+            ) : (
+              <InterviewContent
+                interviews={interviews}
+                jobId={jobId}
+                onRefresh={() => fetchJobAndTests(false)}
               />
             )}
           </div>
@@ -710,6 +757,94 @@ const CodingTestContent = ({
           </>
         )}
       </div>
+    </div>
+  );
+};
+
+// Interview Content Component
+const InterviewContent = ({ interviews, jobId, onRefresh }) => {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-gray-800 mb-2">
+            Interview Management
+          </h3>
+          <p className="text-sm text-gray-600">
+            Schedule and manage interviews for shortlisted candidates
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          Schedule Interview
+        </button>
+      </div>
+
+      {interviews && interviews.length > 0 ? (
+        <div className="space-y-4">
+          {interviews.map((interview) => (
+            <div
+              key={interview.id}
+              className="bg-gray-50 rounded-lg p-4 border border-gray-200"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <span
+                      className={`px-3 py-1 text-sm font-medium rounded-full ${
+                        interview.status === 'SCHEDULED'
+                          ? 'bg-blue-100 text-blue-800'
+                          : interview.status === 'COMPLETED'
+                          ? 'bg-green-100 text-green-800'
+                          : interview.status === 'CANCELLED'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-gray-100 text-gray-800'
+                      }`}
+                    >
+                      {interview.status}
+                    </span>
+                    <span className="px-3 py-1 text-sm bg-purple-100 text-purple-800 rounded-full">
+                      {interview.type}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    <p>
+                      <strong>Date:</strong>{' '}
+                      {new Date(interview.date).toLocaleString()}
+                    </p>
+                    {interview.notes && (
+                      <p className="mt-1">
+                        <strong>Notes:</strong> {interview.notes}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <Video className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">
+            No Interviews Scheduled
+          </h3>
+          <p className="text-gray-600 mb-6">
+            Schedule interviews for shortlisted candidates to proceed with the
+            recruitment process
+          </p>
+          <button
+            onClick={onRefresh}
+            className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            Schedule Interview
+          </button>
+        </div>
+      )}
     </div>
   );
 };
