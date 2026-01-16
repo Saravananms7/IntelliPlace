@@ -119,6 +119,23 @@ router.post('/:jobId/interviews/:applicationId/start', authenticateToken, author
       },
     });
 
+    // Send notification to student
+    try {
+      await prisma.notification.create({
+        data: {
+          studentId: application.studentId,
+          title: 'Interview Started',
+          message: `A ${mode === 'TECH' ? 'Technical' : 'HR'} interview for "${job.title}" has started. Click to join the interview.`,
+          jobId: jobId,
+          applicationId: applicationId,
+        },
+      });
+      console.log(`[Interview Start] Notification sent to student ${application.studentId}`);
+    } catch (notifError) {
+      console.error(`[Interview Start] Failed to send notification:`, notifError);
+      // Don't fail the request if notification fails
+    }
+
     res.json({
       success: true,
       data: {
@@ -167,7 +184,7 @@ router.post('/:jobId/interviews/:applicationId/generate-question', authenticateT
       where: { applicationId },
       include: {
         sessions: {
-          where: { status: 'ACTIVE' },
+          where: { status: { in: ['ACTIVE', 'STOPPED'] } },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
@@ -183,8 +200,38 @@ router.post('/:jobId/interviews/:applicationId/generate-question', authenticateT
     const previousQuestions = questions.map((q) => q.question);
 
     // Prepare data for interview service
-    const requiredSkills = job.requiredSkills ? JSON.parse(job.requiredSkills) : [];
-    const candidateSkills = application.skills ? JSON.parse(application.skills) : null;
+    // Safe JSON parsing - handle both JSON strings and plain strings
+    let requiredSkills = [];
+    if (job.requiredSkills) {
+      try {
+        requiredSkills = typeof job.requiredSkills === 'string' 
+          ? JSON.parse(job.requiredSkills) 
+          : job.requiredSkills;
+        // If it's not an array after parsing, treat as single value
+        if (!Array.isArray(requiredSkills)) {
+          requiredSkills = requiredSkills ? [requiredSkills] : [];
+        }
+      } catch (e) {
+        // If not valid JSON, treat as single string value
+        requiredSkills = [job.requiredSkills];
+      }
+    }
+    
+    let candidateSkills = null;
+    if (application.skills) {
+      try {
+        candidateSkills = typeof application.skills === 'string'
+          ? JSON.parse(application.skills)
+          : application.skills;
+        // If it's not an array after parsing, treat as single value
+        if (!Array.isArray(candidateSkills)) {
+          candidateSkills = candidateSkills ? [candidateSkills] : null;
+        }
+      } catch (e) {
+        // If not valid JSON, treat as single string value
+        candidateSkills = [application.skills];
+      }
+    }
 
     const requestData = {
       mode: session.mode,
@@ -246,33 +293,28 @@ router.post('/:jobId/interviews/:applicationId/generate-question', authenticateT
   }
 });
 
-// Submit answer (Company)
-router.post('/:jobId/interviews/:applicationId/submit-answer', authenticateToken, authorizeCompany, async (req, res) => {
+// Submit answer (Student or Company)
+// Student submits audio/video, Company submits text notes
+router.post('/:jobId/interviews/:applicationId/submit-answer', authenticateToken, async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const userId = req.user.id;
+    const userType = req.user.type; // 'student' or 'company'
     const jobId = parseInt(req.params.jobId);
     const applicationId = parseInt(req.params.applicationId);
-    const { answer, questionIndex } = req.body;
-
-    if (!answer) {
-      return res.status(400).json({ success: false, message: 'Answer is required' });
-    }
-
-    // Verify job belongs to company
-    const job = await prisma.job.findFirst({
-      where: { id: jobId, companyId },
-    });
-
-    if (!job) {
-      return res.status(404).json({ success: false, message: 'Job not found' });
-    }
+    const { answer, questionIndex, audio_data, video_frames, question } = req.body;
 
     // Get active interview session
     const interview = await prisma.interview.findUnique({
       where: { applicationId },
       include: {
+        application: {
+          include: {
+            student: true,
+          },
+        },
+        job: true,
         sessions: {
-          where: { status: 'ACTIVE' },
+          where: { status: { in: ['ACTIVE', 'STOPPED'] } },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
@@ -281,6 +323,17 @@ router.post('/:jobId/interviews/:applicationId/submit-answer', authenticateToken
 
     if (!interview || interview.sessions.length === 0) {
       return res.status(404).json({ success: false, message: 'No active interview session found' });
+    }
+
+    // Verify permissions
+    if (userType === 'company') {
+      if (interview.job.companyId !== userId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
+    } else if (userType === 'student') {
+      if (interview.application.studentId !== userId) {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
     }
 
     const session = interview.sessions[0];
@@ -293,11 +346,57 @@ router.post('/:jobId/interviews/:applicationId/submit-answer', authenticateToken
       return res.status(400).json({ success: false, message: 'Invalid question index' });
     }
 
+    let analysisResult = null;
+
+    // If student submitted audio/video, analyze it
+    if (userType === 'student' && (audio_data || video_frames)) {
+      try {
+        const currentQuestion = questions[questionIdx]?.question || question;
+        
+        // Call interview service for analysis
+        const analysisResponse = await axios.post(
+          `${INTERVIEW_SERVICE_URL}/analyze-answer`,
+          {
+            question: currentQuestion,
+            question_index: questionIdx,
+            audio_data: audio_data,
+            video_frames: video_frames || [],
+            mode: session.mode,
+          },
+          { timeout: 60000 } // 60 second timeout for analysis
+        );
+
+        if (analysisResponse.data.success) {
+          analysisResult = analysisResponse.data.data;
+          
+          // Store analysis in database
+          await prisma.interviewQuestionAnswer.create({
+            data: {
+              sessionId: session.id,
+              questionIndex: questionIdx,
+              questionText: currentQuestion,
+              transcribedText: analysisResult.transcribed_text,
+              contentScore: analysisResult.content_score,
+              confidenceScore: analysisResult.confidence_score,
+              emotionScores: JSON.stringify(analysisResult.emotion_scores || {}),
+              overallScore: analysisResult.overall_score,
+              feedback: analysisResult.feedback,
+              analysisData: JSON.stringify(analysisResult.analysis_data || {}),
+            },
+          });
+        }
+      } catch (analysisError) {
+        console.error('Error analyzing answer:', analysisError);
+        // Continue even if analysis fails
+      }
+    }
+
     // Add or update answer
     const answerData = {
       questionIndex: questionIdx,
-      answer: answer,
+      answer: answer || analysisResult?.transcribed_text || 'Audio/video submitted',
       timestamp: new Date().toISOString(),
+      analysis: analysisResult,
     };
 
     // Update existing answer or add new one
@@ -320,12 +419,129 @@ router.post('/:jobId/interviews/:applicationId/submit-answer', authenticateToken
       success: true,
       data: {
         answer: answerData,
+        analysis: analysisResult,
         message: 'Answer submitted successfully',
       },
     });
   } catch (error) {
     console.error('Error submitting answer:', error);
     res.status(500).json({ success: false, message: 'Failed to submit answer' });
+  }
+});
+
+router.post('/:jobId/interviews/:applicationId/stop', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+    const applicationId = parseInt(req.params.applicationId);
+
+    const job = await prisma.job.findFirst({
+      where: { id: jobId, companyId },
+    });
+
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Job not found' });
+    }
+
+    const interview = await prisma.interview.findUnique({
+      where: { applicationId },
+      include: {
+        sessions: {
+          where: { status: { in: ['ACTIVE', 'STOPPED'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!interview || interview.sessions.length === 0) {
+      return res.status(404).json({ success: false, message: 'No active interview session found' });
+    }
+
+    const session = interview.sessions[0];
+
+    await prisma.interviewSession.update({
+      where: { id: session.id },
+      data: {
+        status: 'STOPPED',
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Interview stopped successfully',
+      },
+    });
+  } catch (error) {
+    console.error('Error stopping interview:', error);
+    res.status(500).json({ success: false, message: 'Failed to stop interview' });
+  }
+});
+
+router.get('/:jobId/interviews/:applicationId/student-session', authenticateToken, authorizeStudent, async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+    const applicationId = parseInt(req.params.applicationId);
+
+    // Verify application belongs to student
+    const application = await prisma.application.findFirst({
+      where: { id: applicationId, studentId, jobId },
+      include: {
+        job: true,
+      },
+    });
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: 'Application not found' });
+    }
+
+    // Get interview with active session
+    const interview = await prisma.interview.findUnique({
+      where: { applicationId },
+      include: {
+        sessions: {
+          where: { status: { in: ['ACTIVE', 'STOPPED'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!interview || interview.sessions.length === 0) {
+      return res.status(404).json({ success: false, message: 'No active interview session found' });
+    }
+
+    const session = interview.sessions[0];
+    const questions = JSON.parse(session.questions || '[]');
+    const answers = JSON.parse(session.answers || '[]');
+
+    const questionsWithAnswers = questions.map((q, idx) => {
+      const qIndex = q.index !== undefined ? q.index : idx;
+      const answer = answers.find((a) => a.questionIndex === qIndex);
+      return {
+        ...q,
+        index: qIndex,
+        answer: answer ? answer.answer : null,
+        analysis: answer?.analysis || null,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        interview,
+        session: {
+          ...session,
+          questions: questionsWithAnswers,
+        },
+        job: application.job,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching student interview session:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch interview session' });
   }
 });
 
@@ -356,7 +572,6 @@ router.get('/:jobId/interviews/:applicationId/session', authenticateToken, autho
                 id: true,
                 name: true,
                 email: true,
-                skills: true,
                 cgpa: true,
                 backlog: true,
               },
@@ -364,7 +579,7 @@ router.get('/:jobId/interviews/:applicationId/session', authenticateToken, autho
           },
         },
         sessions: {
-          where: { status: 'ACTIVE' },
+          where: { status: { in: ['ACTIVE', 'STOPPED'] } },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
@@ -383,12 +598,14 @@ router.get('/:jobId/interviews/:applicationId/session', authenticateToken, autho
     const questions = JSON.parse(session.questions || '[]');
     const answers = JSON.parse(session.answers || '[]');
 
-    // Match answers with questions
     const questionsWithAnswers = questions.map((q, idx) => {
-      const answer = answers.find((a) => a.questionIndex === idx);
+      const qIndex = q.index !== undefined ? q.index : idx;
+      const answer = answers.find((a) => a.questionIndex === qIndex);
       return {
         ...q,
+        index: qIndex,
         answer: answer ? answer.answer : null,
+        analysis: answer?.analysis || null,
       };
     });
 
@@ -429,7 +646,7 @@ router.post('/:jobId/interviews/:applicationId/complete', authenticateToken, aut
       where: { applicationId },
       include: {
         sessions: {
-          where: { status: 'ACTIVE' },
+          where: { status: { in: ['ACTIVE', 'STOPPED'] } },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
