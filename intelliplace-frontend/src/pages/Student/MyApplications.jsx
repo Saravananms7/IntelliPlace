@@ -4,9 +4,10 @@ import CvPreviewModal from '../../components/CvPreviewModal';
 import Modal from '../../components/Modal';
 import StudentTakeTest from '../../components/StudentTakeTest';
 import StudentTakeCodingTest from '../../components/StudentTakeCodingTest';
+import StudentInterview from '../../components/StudentInterview';
 import { useNavigate } from 'react-router-dom';
 import { getCurrentUser } from '../../utils/auth';
-import { Play, Code, RefreshCw } from 'lucide-react';
+import { Play, Code, RefreshCw, Video } from 'lucide-react';
 
 const MyApplications = () => {
   const navigate = useNavigate();
@@ -16,11 +17,15 @@ const MyApplications = () => {
   const [preview, setPreview] = useState(null);
   const [modal, setModal] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [error, setError] = useState(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
   const [isCodingTestOpen, setIsCodingTestOpen] = useState(false);
+  const [isInterviewOpen, setIsInterviewOpen] = useState(false);
   const [testJobId, setTestJobId] = useState(null);
+  const [interviewData, setInterviewData] = useState(null); // { jobId, applicationId, question, questionIndex }
   const [testStatuses, setTestStatuses] = useState({}); // jobId -> test status
   const [codingTestStatuses, setCodingTestStatuses] = useState({}); // jobId -> coding test status
+  const [interviewSessions, setInterviewSessions] = useState({}); // jobId -> interview session data
 
   // Fetch applications and test statuses
   const fetchApplications = async () => {
@@ -80,10 +85,61 @@ const MyApplications = () => {
           // Debug logging
           console.log('Test statuses:', testStatusMap);
           console.log('Coding test statuses:', codingTestStatusMap);
+          
+          // Fetch interview sessions for shortlisted applications
+          const interviewSessionMap = {};
+          for (const app of apps.filter(a => a.status === 'SHORTLISTED')) {
+            try {
+              const interviewRes = await fetch(
+                `http://localhost:5000/api/jobs/${app.jobId}/interviews/${app.id}/student-session`,
+                { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+              );
+              if (interviewRes.ok) {
+                const interviewJson = await interviewRes.json();
+                if (interviewJson.data?.session) {
+                  interviewSessionMap[app.jobId] = interviewJson.data;
+                }
+              }
+            } catch (err) {
+              // Interview might not exist, which is fine
+            }
+          }
+          setInterviewSessions(interviewSessionMap);
         }
       } catch (err) {
         console.error(err);
       } finally { setLoading(false); }
+  };
+  
+  const handleStartInterview = async (jobId, applicationId) => {
+    try {
+      // Fetch latest interview session
+      const res = await fetch(
+        `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/student-session`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.data?.session) {
+          setInterviewData({
+            jobId,
+            applicationId,
+            question: null, // Will show start screen first
+            questionIndex: -1,
+            session: data.data.session,
+          });
+          setIsInterviewOpen(true);
+        } else {
+          setError('No active interview session found');
+        }
+      } else {
+        setError('Failed to load interview session');
+      }
+    } catch (err) {
+      console.error('Error fetching interview session:', err);
+      setError('Failed to load interview session');
+    }
   };
 
   useEffect(() => {
@@ -141,6 +197,53 @@ const MyApplications = () => {
       }
     }
   }, [applications]); // Run when applications are loaded or updated
+  
+  // Check if we need to open an interview from notification
+  useEffect(() => {
+    const openInterviewData = sessionStorage.getItem('openInterview');
+    if (openInterviewData && applications.length > 0) {
+      try {
+        const { jobId, applicationId } = JSON.parse(openInterviewData);
+        sessionStorage.removeItem('openInterview');
+        
+        // Check if student has a shortlisted application for this job
+        const app = applications.find(a => a.jobId === jobId && a.id === applicationId && a.status === 'SHORTLISTED');
+        
+        if (app) {
+          // Fetch interview session and open
+          const checkAndOpen = async () => {
+            try {
+              const interviewRes = await fetch(
+                `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/student-session`,
+                { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+              );
+              
+              if (interviewRes.ok) {
+                const interviewJson = await interviewRes.json();
+                if (interviewJson.data?.session) {
+                  // Open interview interface (will show start screen)
+                  setInterviewData({
+                    jobId,
+                    applicationId,
+                    question: null, // No question yet - will show start screen
+                    questionIndex: -1,
+                    session: interviewJson.data.session,
+                  });
+                  setIsInterviewOpen(true);
+                }
+              }
+            } catch (err) {
+              console.error('Failed to check interview availability:', err);
+            }
+          };
+          
+          setTimeout(checkAndOpen, 500);
+        }
+      } catch (err) {
+        console.error('Failed to parse interview data:', err);
+      }
+    }
+  }, [applications]);
   
   // Manual refresh function (reuses the same logic)
   const handleRefresh = fetchApplications;
@@ -289,6 +392,16 @@ const MyApplications = () => {
                       )}
                     </>
                   )}
+                  
+                  {app.status === 'SHORTLISTED' && interviewSessions[app.jobId] && (
+                    <button
+                      onClick={() => handleStartInterview(app.jobId, app.id)}
+                      className="flex items-center gap-2 px-3 py-1 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700"
+                    >
+                      <Video className="w-4 h-4" />
+                      Start Interview
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -352,6 +465,27 @@ const MyApplications = () => {
           })();
         }}
       />
+      
+      {/* Student Interview Modal */}
+      {interviewData && (
+        <StudentInterview
+          isOpen={isInterviewOpen}
+          onClose={() => {
+            setIsInterviewOpen(false);
+            setInterviewData(null);
+            fetchApplications(); // Refresh to update interview status
+          }}
+          jobId={interviewData.jobId}
+          applicationId={interviewData.applicationId}
+          question={interviewData.question}
+          questionIndex={interviewData.questionIndex}
+          session={interviewData.session}
+          onAnswerSubmitted={(result) => {
+            console.log('Answer submitted:', result);
+            fetchApplications(); // Refresh to show next question or updated status
+          }}
+        />
+      )}
     </div>
   );
 };

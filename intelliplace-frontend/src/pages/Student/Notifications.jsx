@@ -76,12 +76,21 @@ const Notifications = () => {
       
       // Check if this is a coding test notification
       const isCodingTestNotification = notif.title && notif.title.toLowerCase().includes('coding test');
+      // Check if this is an interview notification
+      const isInterviewNotification = notif.title && notif.title.toLowerCase().includes('interview');
       
       if (payload.application) {
         // If it's a coding test notification, navigate with a flag to open the test
         if (isCodingTestNotification && payload.application.jobId) {
           // Store the jobId in sessionStorage so the applications page can detect it
           sessionStorage.setItem('openCodingTest', payload.application.jobId.toString());
+        }
+        // If it's an interview notification, navigate with a flag to open the interview
+        if (isInterviewNotification && payload.application.jobId && payload.application.id) {
+          sessionStorage.setItem('openInterview', JSON.stringify({
+            jobId: payload.application.jobId,
+            applicationId: payload.application.id
+          }));
         }
         navigate('/student/applications');
         return;
@@ -113,8 +122,17 @@ const Notifications = () => {
       
       // Check if it's a coding test notification
       const isCodingTestNotification = notif.title && notif.title.toLowerCase().includes('coding test');
+      // Check if it's an interview notification
+      const isInterviewNotification = notif.title && notif.title.toLowerCase().includes('interview');
+      
       if (isCodingTestNotification && notif.jobId) {
         sessionStorage.setItem('openCodingTest', notif.jobId.toString());
+        navigate('/student/applications');
+      } else if (isInterviewNotification && notif.jobId && notif.applicationId) {
+        sessionStorage.setItem('openInterview', JSON.stringify({
+          jobId: notif.jobId,
+          applicationId: notif.applicationId
+        }));
         navigate('/student/applications');
       } else if (notif.applicationId) {
         navigate('/student/applications');

@@ -121,7 +121,7 @@ const RecruitmentProcess = () => {
         );
         if (codingRes.ok) {
           const codingData = await codingRes.json();
-          setCodingTest(codingData.data);
+          setCodingTest(codingData.data || codingData);
         } else if (codingRes.status === 404) {
           // 404 means no test exists - this is normal, not an error
           setCodingTest(null);
@@ -677,7 +677,9 @@ const CodingTestContent = ({
     );
   }
 
-  const allowedLanguages = test.allowedLanguages
+  const allowedLanguages = Array.isArray(test.allowedLanguages)
+    ? test.allowedLanguages
+    : test.allowedLanguages
     ? JSON.parse(test.allowedLanguages)
     : [];
   const languageNames = {
