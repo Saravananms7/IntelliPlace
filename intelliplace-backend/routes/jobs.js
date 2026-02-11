@@ -10,6 +10,18 @@ import { createRequire } from 'module';
 import axios from 'axios';
 
 const require = createRequire(import.meta.url);
+// Ensure DOMMatrix is available in Node for pdf-parse (polyfill)
+try {
+  const dommatrix = require('dommatrix') || require('@thednp/dommatrix');
+  if (dommatrix) {
+    if (typeof global.DOMMatrix === 'undefined') {
+      global.DOMMatrix = dommatrix.DOMMatrix || dommatrix;
+    }
+  }
+} catch (e) {
+  // If polyfill not installed, continue and let require fail with informative error
+}
+
 // pdf-parse v2.x uses class-based API
 const { PDFParse } = require('pdf-parse');
 
