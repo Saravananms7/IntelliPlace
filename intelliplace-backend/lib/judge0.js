@@ -1,12 +1,26 @@
 import axios from 'axios';
 
-// Judge0 Language IDs
+// Judge0 Language IDs (used in DB and frontend)
 export const JUDGE0_LANGUAGES = {
   C: 50,
   'C++': 54,
   PYTHON: 92,
   JAVA: 91
 };
+
+// Judge0 CE v1.13+ uses different IDs than old Judge0/RapidAPI
+// Map our internal IDs to Judge0 CE language IDs
+const JUDGE0_CE_LANGUAGE_MAP = {
+  50: 50,   // C
+  54: 54,   // C++
+  92: 71,   // Python (92 -> 71 in Judge0 CE)
+  91: 91    // Java
+};
+
+function mapToJudge0LanguageId(languageId) {
+  const id = parseInt(languageId, 10);
+  return JUDGE0_CE_LANGUAGE_MAP[id] ?? id;
+}
 
 // Judge0 Status IDs
 export const JUDGE0_STATUS = {
@@ -34,13 +48,15 @@ export const JUDGE0_STATUS = {
 export async function submitToJudge0(sourceCode, languageId, stdin = '', timeLimit = 5, memoryLimit = 128000) {
   const JUDGE0_API_URL = process.env.JUDGE0_API_URL || 'http://localhost:2358';
   const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY;
+  const JUDGE0_AUTH_TOKEN = process.env.JUDGE0_AUTH_TOKEN;
 
   try {
+    const judge0LangId = mapToJudge0LanguageId(languageId);
     const response = await axios.post(
       `${JUDGE0_API_URL}/submissions`,
       {
         source_code: sourceCode,
-        language_id: languageId,
+        language_id: judge0LangId,
         stdin: stdin,
         cpu_time_limit: timeLimit,
         memory_limit: memoryLimit,
@@ -49,7 +65,8 @@ export async function submitToJudge0(sourceCode, languageId, stdin = '', timeLim
       {
         headers: {
           'Content-Type': 'application/json',
-          ...(JUDGE0_API_KEY && { 'X-RapidAPI-Key': JUDGE0_API_KEY })
+          ...(JUDGE0_API_KEY && { 'X-RapidAPI-Key': JUDGE0_API_KEY }),
+          ...(JUDGE0_AUTH_TOKEN && { 'X-Auth-Token': JUDGE0_AUTH_TOKEN })
         },
         timeout: 10000
       }
@@ -81,13 +98,15 @@ export async function submitToJudge0(sourceCode, languageId, stdin = '', timeLim
 export async function getJudge0Result(token) {
   const JUDGE0_API_URL = process.env.JUDGE0_API_URL || 'http://localhost:2358';
   const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY;
+  const JUDGE0_AUTH_TOKEN = process.env.JUDGE0_AUTH_TOKEN;
 
   try {
     const response = await axios.get(
       `${JUDGE0_API_URL}/submissions/${token}`,
       {
         headers: {
-          ...(JUDGE0_API_KEY && { 'X-RapidAPI-Key': JUDGE0_API_KEY })
+          ...(JUDGE0_API_KEY && { 'X-RapidAPI-Key': JUDGE0_API_KEY }),
+          ...(JUDGE0_AUTH_TOKEN && { 'X-Auth-Token': JUDGE0_AUTH_TOKEN })
         },
         timeout: 10000
       }
@@ -196,8 +215,14 @@ export async function executeWithTestCases(sourceCode, languageId, testCases, ex
     const statusId = result.data.status?.id;
     const stdout = result.data.stdout || '';
     const stderr = result.data.stderr || '';
+    const judge0Message = result.data.message || '';
     const actualOutput = stdout.trim();
     const passed = actualOutput === expectedOutput && statusId === 3; // 3 = ACCEPTED
+
+    let errorMsg = stderr || (statusId !== 3 ? result.data.status?.description : null);
+    if (statusId === 8 || statusId === 13) {
+      errorMsg = judge0Message || errorMsg || 'Judge0 internal error. Try again or check Judge0 logs.';
+    }
 
     if (passed) passedCount++;
 
@@ -208,7 +233,7 @@ export async function executeWithTestCases(sourceCode, languageId, testCases, ex
       actual: actualOutput,
       passed: passed,
       status: getStatusDescription(statusId),
-      error: stderr || (statusId !== 3 ? result.data.status?.description : null),
+      error: errorMsg,
       executionTime: result.data.time,
       memoryUsed: result.data.memory,
       token: submission.token
@@ -237,7 +262,8 @@ function getStatusDescription(statusId) {
     7: 'RUNTIME_ERROR',
     8: 'INTERNAL_ERROR',
     9: 'EXEC_FORMAT_ERROR',
-    10: 'MEMORY_LIMIT_EXCEEDED'
+    10: 'MEMORY_LIMIT_EXCEEDED',
+    13: 'INTERNAL_ERROR'
   };
   return statusMap[statusId] || 'UNKNOWN';
 }

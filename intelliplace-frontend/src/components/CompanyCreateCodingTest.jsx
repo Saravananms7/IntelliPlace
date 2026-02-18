@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Trash2, X, CheckCircle } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { API_BASE_URL } from '../config.js';
 
 const JUDGE0_LANGUAGES = {
   C: 50,
@@ -34,7 +35,7 @@ const CompanyCreateCodingTest = ({ isOpen, onClose, jobId, onCreated, editingTes
       if (editingTest) {
         // Load existing test data for editing
         setFetching(true);
-        fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test`, {
+        fetch(`${API_BASE_URL}/jobs/${jobId}/coding-test`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
         })
           .then(res => res.json())
@@ -175,7 +176,7 @@ const CompanyCreateCodingTest = ({ isOpen, onClose, jobId, onCreated, editingTes
       const isEdit = !!editingTest;
       const method = isEdit ? 'PUT' : 'POST';
 
-      const res = await fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test`, {
+      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/coding-test`, {
         method,
         headers: {
           'Content-Type': 'application/json',

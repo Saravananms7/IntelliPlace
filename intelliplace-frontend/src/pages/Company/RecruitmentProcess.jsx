@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import Navbar from '../../components/Navbar';
 import { getCurrentUser } from '../../utils/auth';
+import { API_BASE_URL } from '../../config.js';
 import CompanyCreateTest from '../../components/CompanyCreateTest';
 import CompanyCreateCodingTest from '../../components/CompanyCreateCodingTest';
 import CompanyViewTest from '../../components/CompanyViewTest';
@@ -70,7 +71,7 @@ const RecruitmentProcess = () => {
     try {
       // Fetch job details from jobs list (since there's no single job endpoint)
       try {
-        const jobsRes = await fetch(`http://localhost:5000/api/jobs?limit=100`, {
+        const jobsRes = await fetch(`${API_BASE_URL}/jobs?limit=100`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
         });
         if (jobsRes.ok) {
@@ -88,7 +89,7 @@ const RecruitmentProcess = () => {
       // Fetch aptitude test
       try {
         const aptitudeRes = await fetch(
-          `http://localhost:5000/api/jobs/${jobId}/aptitude-test`,
+          `${API_BASE_URL}/jobs/${jobId}/aptitude-test`,
           {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }
@@ -114,7 +115,7 @@ const RecruitmentProcess = () => {
       // Fetch coding test
       try {
         const codingRes = await fetch(
-          `http://localhost:5000/api/jobs/${jobId}/coding-test`,
+          `${API_BASE_URL}/jobs/${jobId}/coding-test`,
           {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }
@@ -140,7 +141,7 @@ const RecruitmentProcess = () => {
       // Fetch interviews
       try {
         const interviewsRes = await fetch(
-          `http://localhost:5000/api/jobs/${jobId}/interviews`,
+          `${API_BASE_URL}/jobs/${jobId}/interviews`,
           {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }
@@ -166,7 +167,7 @@ const RecruitmentProcess = () => {
       // Fetch shortlisted applications
       try {
         const applicationsRes = await fetch(
-          `http://localhost:5000/api/jobs/${jobId}/applicants`,
+          `${API_BASE_URL}/jobs/${jobId}/applicants`,
           {
             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           }
@@ -223,8 +224,8 @@ const RecruitmentProcess = () => {
       const token = localStorage.getItem('token');
       const endpoint =
         testToStart.type === 'coding'
-          ? `http://localhost:5000/api/jobs/${jobId}/coding-test/start`
-          : `http://localhost:5000/api/jobs/${jobId}/aptitude-test/start`;
+          ? `${API_BASE_URL}/jobs/${jobId}/coding-test/start`
+          : `${API_BASE_URL}/jobs/${jobId}/aptitude-test/start`;
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -261,8 +262,8 @@ const RecruitmentProcess = () => {
       const token = localStorage.getItem('token');
       const endpoint =
         testToStart.type === 'coding'
-          ? `http://localhost:5000/api/jobs/${jobId}/coding-test/stop`
-          : `http://localhost:5000/api/jobs/${jobId}/aptitude-test/stop`;
+          ? `${API_BASE_URL}/jobs/${jobId}/coding-test/stop`
+          : `${API_BASE_URL}/jobs/${jobId}/aptitude-test/stop`;
 
       const res = await fetch(endpoint, {
         method: 'POST',

@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Clock, AlertTriangle, Lock, Play, CheckCircle, XCircle, Loader } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { API_BASE_URL } from '../config.js';
 
 const JUDGE0_LANGUAGES = {
   C: 50,
@@ -31,6 +32,7 @@ const StudentTakeCodingTest = ({ isOpen, onClose, jobId, onSubmitted }) => {
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [running, setRunning] = useState({});
+  const [runOutput, setRunOutput] = useState(null);
 
   const containerRef = useRef(null);
   const timerRef = useRef(null);
@@ -119,7 +121,7 @@ const StudentTakeCodingTest = ({ isOpen, onClose, jobId, onSubmitted }) => {
     setSubmitting(false);
     submittingRef.current = false;
 
-    fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test`, {
+    fetch(`${API_BASE_URL}/jobs/${jobId}/coding-test`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`
       }
@@ -227,9 +229,10 @@ int main() {
     }
 
     setRunning(prev => ({ ...prev, [questionId]: true }));
+    setRunOutput(null);
 
     try {
-      const res = await fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test/submit`, {
+      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/coding-test/run-sample`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -245,28 +248,37 @@ int main() {
       const json = await res.json();
 
       if (json.success) {
-        const result = json.data.results[0]; // First test case result
+        const result = json.data.results?.[0];
+        if (!result) {
+          setRunOutput({ status: 'error', title: 'No result', message: 'No result returned from sample run' });
+          return;
+        }
         if (result.passed) {
-          Swal.fire({
-            icon: 'success',
+          setRunOutput({
+            status: 'passed',
             title: 'Sample Test Passed!',
-            text: `Output: ${result.actual}`,
-            confirmButtonColor: '#2563eb'
+            message: result.actual ?? '(no output)',
+            details: result.executionTime != null ? `Execution time: ${result.executionTime}s` : null
           });
         } else {
-          Swal.fire({
-            icon: 'error',
-            title: 'Sample Test Failed',
-            text: result.error || `Expected: ${result.expected}, Got: ${result.actual}`,
-            confirmButtonColor: '#dc2626'
+          const isInternalError = result.status === 'INTERNAL_ERROR';
+          const mainMsg = result.error || `Expected: ${result.expected ?? '?'}, Got: ${result.actual ?? '?'}`;
+          const details = isInternalError
+            ? 'Judge0 encountered an error. This may be temporary—try again. Ensure Judge0 Docker is running.'
+            : (result.actual !== undefined && result.actual !== '' ? `Your output: ${result.actual}` : null);
+          setRunOutput({
+            status: 'failed',
+            title: isInternalError ? 'Execution Error' : 'Sample Test Failed',
+            message: mainMsg,
+            details
           });
         }
       } else {
-        Swal.fire('Error', json.message || 'Failed to run code', 'error');
+        setRunOutput({ status: 'error', title: 'Error', message: json.message || 'Failed to run code' });
       }
     } catch (err) {
       console.error(err);
-      Swal.fire('Error', 'Failed to run code', 'error');
+      setRunOutput({ status: 'error', title: 'Error', message: err.message || 'Failed to run code' });
     } finally {
       setRunning(prev => ({ ...prev, [questionId]: false }));
     }
@@ -285,7 +297,7 @@ int main() {
     setSubmitting(true);
 
     try {
-      const res = await fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test/submit`, {
+      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/coding-test/submit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -351,7 +363,7 @@ int main() {
       
       if (currentCode && currentCode.trim()) {
         try {
-          await fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test/submit`, {
+          await fetch(`${API_BASE_URL}/jobs/${jobId}/coding-test/submit`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -389,12 +401,19 @@ int main() {
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   };
 
-  if (!isOpen) return null;
-
-  const currentQuestion = testData?.questions[currentQuestionIndex];
+  const currentQuestion = testData?.questions?.[currentQuestionIndex];
   const currentSubmission = currentQuestion ? submissions[currentQuestion.id] : null;
   const currentCodeValue = currentQuestion ? code[currentQuestion.id] || '' : '';
   const currentLangValue = currentQuestion ? selectedLanguage[currentQuestion.id] : null;
+  const allowedLangs = useMemo(() => {
+    try {
+      const raw = testData?.allowedLanguages;
+      return Array.isArray(raw) ? raw : (typeof raw === 'string' ? JSON.parse(raw || '[]') : []);
+    } catch {
+      return [];
+    }
+  }, [testData?.allowedLanguages]);
+  if (!isOpen) return null;
 
   return (
     <AnimatePresence>
@@ -458,7 +477,7 @@ int main() {
                   return (
                     <button
                       key={q.id}
-                      onClick={() => setCurrentQuestionIndex(idx)}
+                      onClick={() => { setCurrentQuestionIndex(idx); setRunOutput(null); }}
                       className={`w-full text-left p-3 rounded-lg border transition-colors ${
                         isCurrent
                           ? 'bg-blue-50 border-blue-500'
@@ -571,7 +590,7 @@ int main() {
                           className="px-3 py-1 border rounded-lg focus:ring-2 focus:ring-blue-500"
                           disabled={!!currentSubmission}
                         >
-                          {testData.allowedLanguages.map(langId => (
+                          {allowedLangs.map(langId => (
                             <option key={langId} value={langId}>
                               {LANGUAGE_NAMES[langId]}
                             </option>
@@ -611,8 +630,47 @@ int main() {
                       </div>
                     </div>
 
-                    {/* CODE TEXTAREA */}
-                    <div className="flex-1 p-4">
+                    {/* RUN OUTPUT PANEL */}
+                    {runOutput && (
+                      <div
+                        className={`border-t px-4 py-3 ${
+                          runOutput.status === 'passed'
+                            ? 'bg-green-50 border-green-200'
+                            : runOutput.status === 'failed'
+                            ? 'bg-amber-50 border-amber-200'
+                            : 'bg-red-50 border-red-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span
+                            className={`font-semibold ${
+                              runOutput.status === 'passed'
+                                ? 'text-green-800'
+                                : runOutput.status === 'failed'
+                                ? 'text-amber-800'
+                                : 'text-red-800'
+                            }`}
+                          >
+                            {runOutput.title}
+                          </span>
+                          <button
+                            onClick={() => setRunOutput(null)}
+                            className="ml-auto text-gray-500 hover:text-gray-700 text-sm"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                        <pre className="text-sm font-mono whitespace-pre-wrap break-words text-gray-800 mt-1">
+                          {runOutput.message}
+                        </pre>
+                        {runOutput.details && (
+                          <p className="text-xs text-gray-600 mt-2">{runOutput.details}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* CODE EDITOR */}
+                    <div className="flex-1 p-4 min-h-0 flex flex-col overflow-hidden">
                       <textarea
                         value={currentCodeValue}
                         onChange={(e) => {

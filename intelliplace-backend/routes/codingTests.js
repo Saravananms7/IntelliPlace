@@ -585,6 +585,82 @@ router.put('/:jobId/coding-test', authenticateToken, authorizeCompany, async (re
   }
 });
 
+// Run sample test only (Student) - does not save submission
+router.post('/:jobId/coding-test/run-sample', authenticateToken, authorizeStudent, async (req, res) => {
+  try {
+    const jobId = parseInt(req.params.jobId);
+    const { questionId, languageId, code } = req.body;
+
+    if (!questionId || !languageId || !code) {
+      return res.status(400).json({ success: false, message: 'questionId, languageId, and code are required' });
+    }
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+
+    const codingTest = await prisma.codingTest.findUnique({
+      where: { jobId },
+      include: { questions: true }
+    });
+    if (!codingTest) return res.status(404).json({ success: false, message: 'Coding test not found' });
+    if (codingTest.status !== 'STARTED') {
+      return res.status(400).json({ success: false, message: 'Coding test has not started yet' });
+    }
+
+    const application = await prisma.application.findFirst({
+      where: { jobId, studentId: req.user.id, status: 'SHORTLISTED' }
+    });
+    if (!application) {
+      return res.status(403).json({ success: false, message: 'You must be shortlisted to take this test' });
+    }
+
+    const question = codingTest.questions.find(q => q.id === questionId);
+    if (!question) return res.status(404).json({ success: false, message: 'Question not found' });
+
+    const allowedLanguages = typeof codingTest.allowedLanguages === 'string'
+      ? JSON.parse(codingTest.allowedLanguages)
+      : codingTest.allowedLanguages;
+    const langId = parseInt(languageId);
+    if (!allowedLanguages.includes(langId)) {
+      return res.status(400).json({ success: false, message: 'Language not allowed for this test' });
+    }
+
+    let sampleInput, sampleOutput;
+    if (question.sampleInput && question.sampleOutput) {
+      sampleInput = question.sampleInput;
+      sampleOutput = question.sampleOutput;
+    } else {
+      const testCases = JSON.parse(question.testCases);
+      const expectedOutputs = JSON.parse(question.expectedOutputs);
+      if (!testCases.length) {
+        return res.status(400).json({ success: false, message: 'No sample input available for this question' });
+      }
+      sampleInput = testCases[0];
+      sampleOutput = expectedOutputs[0] || '';
+    }
+
+    const executionResult = await executeWithTestCases(
+      code,
+      langId,
+      [sampleInput],
+      [sampleOutput],
+      Math.min((codingTest.timeLimit || 60) * 60, 15)
+    );
+
+    res.json({
+      success: true,
+      data: {
+        results: executionResult.results,
+        passedCount: executionResult.passedCount,
+        totalCount: executionResult.totalCount
+      }
+    });
+  } catch (error) {
+    console.error('Error running sample:', error);
+    res.status(500).json({ success: false, message: error.message || 'Server error running sample' });
+  }
+});
+
 // Submit code for a question (Student)
 router.post('/:jobId/coding-test/submit', authenticateToken, authorizeStudent, async (req, res) => {
   try {
@@ -674,8 +750,12 @@ router.post('/:jobId/coding-test/submit', authenticateToken, authorizeStudent, a
         code: code,
         status: status,
         score: score,
-        executionTime: executionResult.results.reduce((sum, r) => sum + (r.executionTime || 0), 0) / executionResult.results.length,
-        memoryUsed: executionResult.results.reduce((sum, r) => sum + (r.memoryUsed || 0), 0) / executionResult.results.length,
+        executionTime: executionResult.results.length > 0
+          ? executionResult.results.reduce((sum, r) => sum + (r.executionTime || 0), 0) / executionResult.results.length
+          : null,
+        memoryUsed: executionResult.results.length > 0
+          ? executionResult.results.reduce((sum, r) => sum + (r.memoryUsed || 0), 0) / executionResult.results.length
+          : null,
         testCaseResults: JSON.stringify(executionResult.results),
         errorMessage: executionResult.results.find(r => r.error)?.error || null
       }

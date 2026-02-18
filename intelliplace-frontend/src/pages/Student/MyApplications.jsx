@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Navbar from '../../components/Navbar';
+import { API_BASE_URL } from '../../config.js';
 import CvPreviewModal from '../../components/CvPreviewModal';
 import Modal from '../../components/Modal';
 import StudentTakeTest from '../../components/StudentTakeTest';
@@ -31,7 +32,7 @@ const MyApplications = () => {
   const fetchApplications = async () => {
       setLoading(true);
       try {
-        const res = await fetch('http://localhost:5000/api/jobs/my-applications', {
+        const res = await fetch(`${API_BASE_URL}/jobs/my-applications`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
         });
         const json = await res.json();
@@ -49,7 +50,7 @@ const MyApplications = () => {
           for (const jobId of shortlistedJobs) {
             try {
               // Fetch aptitude test status
-              const testRes = await fetch(`http://localhost:5000/api/jobs/${jobId}/aptitude-test/status`, {
+              const testRes = await fetch(`${API_BASE_URL}/jobs/${jobId}/aptitude-test/status`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
               });
               if (testRes.ok) {
@@ -61,7 +62,7 @@ const MyApplications = () => {
               
               // Fetch coding test status - use simpler status endpoint
               try {
-                const codingTestRes = await fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test/status`, {
+                const codingTestRes = await fetch(`${API_BASE_URL}/jobs/${jobId}/coding-test/status`, {
                   headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                 });
                 if (codingTestRes.ok) {
@@ -91,7 +92,7 @@ const MyApplications = () => {
           for (const app of apps.filter(a => a.status === 'SHORTLISTED')) {
             try {
               const interviewRes = await fetch(
-                `http://localhost:5000/api/jobs/${app.jobId}/interviews/${app.id}/student-session`,
+                `${API_BASE_URL}/jobs/${app.jobId}/interviews/${app.id}/student-session`,
                 { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
               );
               if (interviewRes.ok) {
@@ -115,7 +116,7 @@ const MyApplications = () => {
     try {
       // Fetch latest interview session
       const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/student-session`,
+        `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/student-session`,
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
       
@@ -175,7 +176,7 @@ const MyApplications = () => {
         // Check if coding test is available
         const checkAndOpen = async () => {
           try {
-            const codingTestRes = await fetch(`http://localhost:5000/api/jobs/${jobId}/coding-test/status`, {
+            const codingTestRes = await fetch(`${API_BASE_URL}/jobs/${jobId}/coding-test/status`, {
               headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
             });
             
@@ -214,7 +215,7 @@ const MyApplications = () => {
           const checkAndOpen = async () => {
             try {
               const interviewRes = await fetch(
-                `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/student-session`,
+                `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/student-session`,
                 { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
               );
               
@@ -254,7 +255,7 @@ const MyApplications = () => {
     const filename = parts[parts.length - 1];
 
     try {
-      const res = await fetch(`http://localhost:5000/api/jobs/cv/${filename}`, {
+      const res = await fetch(`${API_BASE_URL}/jobs/cv/${filename}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       if (!res.ok) {
@@ -377,7 +378,7 @@ const MyApplications = () => {
                       {codingTestStatuses[app.jobId] === 'STARTED' ? (
                         <button
                           onClick={() => {
-                            setTestJobId(app.jobId);
+                            setTestJobId(Number(app.jobId));
                             setIsCodingTestOpen(true);
                           }}
                           className="flex items-center gap-2 px-3 py-1 bg-purple-600 text-white rounded-md text-sm hover:bg-purple-700"
@@ -435,7 +436,7 @@ const MyApplications = () => {
           // Refresh applications to pick up status changes
           (async () => {
             try {
-              const res = await fetch('http://localhost:5000/api/jobs/my-applications', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+              const res = await fetch(`${API_BASE_URL}/jobs/my-applications`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
               const json = await res.json();
               if (res.ok) setApplications(json.data.applications || []);
               setNotice({ type: 'success', text: 'Test submitted. Your application status may have updated.' });
@@ -448,14 +449,14 @@ const MyApplications = () => {
 
       {/* Student Take Coding Test Modal */}
       <StudentTakeCodingTest
-        isOpen={isCodingTestOpen}
+        isOpen={isCodingTestOpen && !!testJobId}
         onClose={() => { setIsCodingTestOpen(false); setTestJobId(null); }}
         jobId={testJobId}
         onSubmitted={() => {
           // Refresh applications to pick up status changes
           (async () => {
             try {
-              const res = await fetch('http://localhost:5000/api/jobs/my-applications', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+              const res = await fetch(`${API_BASE_URL}/jobs/my-applications`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
               const json = await res.json();
               if (res.ok) setApplications(json.data.applications || []);
               setNotice({ type: 'success', text: 'Coding test submitted. Your application status may have updated.' });

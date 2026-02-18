@@ -1,5 +1,4 @@
-// API configuration and debug logging
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { API_BASE_URL } from '../config.js';
 console.log('API Base URL:', API_BASE_URL); // Debug log
 
 // Helper function to make API calls
