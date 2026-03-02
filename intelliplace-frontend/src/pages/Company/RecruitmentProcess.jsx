@@ -14,6 +14,7 @@ import {
   XCircle,
   Clock,
   Video,
+  Users,
 } from 'lucide-react';
 import Navbar from '../../components/Navbar';
 import { getCurrentUser } from '../../utils/auth';
@@ -22,6 +23,7 @@ import CompanyCreateTest from '../../components/CompanyCreateTest';
 import CompanyCreateCodingTest from '../../components/CompanyCreateCodingTest';
 import CompanyViewTest from '../../components/CompanyViewTest';
 import CompanyStartInterview from '../../components/CompanyStartInterview';
+import ApplicationsList from '../../components/ApplicationsList';
 import Modal from '../../components/Modal';
 
 const RecruitmentProcess = () => {
@@ -51,6 +53,7 @@ const RecruitmentProcess = () => {
   const [startLoading, setStartLoading] = useState(false);
   const [stopLoading, setStopLoading] = useState(false);
   const [testToStart, setTestToStart] = useState(null); // { type: 'aptitude' | 'coding' }
+  const [showApplicationsList, setShowApplicationsList] = useState(false);
 
   const fetchJobAndTests = useCallback(async (showLoading = true) => {
     if (!jobId) {
@@ -291,15 +294,14 @@ const RecruitmentProcess = () => {
     }
   };
 
-  // Show loading or redirect
+  // Redirect if not authenticated as company
   if (!user || user.userType !== 'company') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <Navbar />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="text-center py-12">
-            <p className="text-gray-600">Redirecting...</p>
-          </div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4" />
+          <p className="text-gray-700 font-medium">Redirecting to login...</p>
         </div>
       </div>
     );
@@ -330,13 +332,24 @@ const RecruitmentProcess = () => {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <button
-            onClick={() => navigate('/company/dashboard')}
-            className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Dashboard
-          </button>
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={() => navigate('/company/dashboard')}
+              className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Dashboard
+            </button>
+            {jobId && (
+              <button
+                onClick={() => setShowApplicationsList(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                <Users className="w-4 h-4" />
+                View Applications & Coding Results
+              </button>
+            )}
+          </div>
           <div>
             <h1 className="text-3xl font-bold text-gray-800">
               Recruitment Process
@@ -536,6 +549,14 @@ const RecruitmentProcess = () => {
           applicationId={selectedApplication.id}
           application={selectedApplication}
           job={job}
+        />
+      )}
+
+      {showApplicationsList && jobId && (
+        <ApplicationsList
+          jobId={parseInt(jobId)}
+          initialJobStatus={job?.status}
+          onClose={() => setShowApplicationsList(false)}
         />
       )}
     </div>

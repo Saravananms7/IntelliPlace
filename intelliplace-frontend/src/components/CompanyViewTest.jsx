@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Check } from "lucide-react";
+import { API_BASE_URL } from "../config.js";
 
 const CompanyViewTest = ({ isOpen, onClose, jobId, test }) => {
   const [loading, setLoading] = useState(false);
@@ -18,7 +19,7 @@ const CompanyViewTest = ({ isOpen, onClose, jobId, test }) => {
       setLoading(true);
       try {
         const res = await fetch(
-          `http://localhost:5000/api/jobs/${jobId}/aptitude-test`,
+          `${API_BASE_URL}/jobs/${jobId}/aptitude-test`,
           {
             headers: {
               Authorization: `Bearer ${localStorage.getItem("token")}`,

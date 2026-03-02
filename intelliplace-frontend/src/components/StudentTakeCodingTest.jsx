@@ -1,8 +1,12 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Clock, AlertTriangle, Lock, Play, CheckCircle, XCircle, Loader } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_URL } from '../config.js';
+
+import CodeMirror from '@uiw/react-codemirror';
+import { langs } from '@uiw/codemirror-extensions-langs';
+import { basicDark } from '@uiw/codemirror-theme-basic';
 
 const JUDGE0_LANGUAGES = {
   C: 50,
@@ -18,7 +22,30 @@ const LANGUAGE_NAMES = {
   91: 'Java'
 };
 
+const getLanguageExtension = (languageId) => {
+  try {
+    switch (parseInt(languageId, 10)) {
+      case 50:
+      case 54: return [langs.cpp()];
+      case 92: return [langs.python()];
+      case 91: return [langs.java()];
+      default: return [langs.cpp()];
+    }
+  } catch {
+    return [];
+  }
+};
+
 const MAX_WARNINGS = 2;
+
+class CodeEditorErrorBoundary extends React.Component {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err) { console.warn('CodeMirror error, using textarea:', err); }
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
 
 const StudentTakeCodingTest = ({ isOpen, onClose, jobId, onSubmitted }) => {
   const [loading, setLoading] = useState(false);
@@ -41,8 +68,8 @@ const StudentTakeCodingTest = ({ isOpen, onClose, jobId, onSubmitted }) => {
   /* ---------------- FULLSCREEN ---------------- */
   const enterFullscreen = async () => {
     try {
-      if (!document.fullscreenElement) {
-        await containerRef.current?.requestFullscreen();
+      if (containerRef.current && !document.fullscreenElement && document.fullscreenEnabled) {
+        await containerRef.current.requestFullscreen();
       }
     } catch {}
   };
@@ -223,7 +250,8 @@ int main() {
       return;
     }
 
-    if (!question.sampleInput) {
+    const hasSample = (question.sampleCases && question.sampleCases.length > 0) || question.sampleInput;
+    if (!hasSample) {
       Swal.fire('Info', 'No sample input available for this question', 'info');
       return;
     }
@@ -313,26 +341,27 @@ int main() {
       const json = await res.json();
 
       if (json.success) {
+        const sub = json.data.submission;
+        const passedCount = sub.passedCount;
+        const totalCount = sub.totalCount;
         setSubmissions(prev => ({
           ...prev,
-          [questionId]: json.data.submission
+          [questionId]: { ...sub, passedCount, totalCount }
         }));
 
-        const passedCount = json.data.submission.passedCount;
-        const totalCount = json.data.submission.totalCount;
-
+        const pts = testData.questions.find(q => q.id === questionId)?.points || 0;
         if (passedCount === totalCount) {
           Swal.fire({
             icon: 'success',
             title: 'All Test Cases Passed!',
-            text: `Score: ${json.data.submission.score.toFixed(1)}/${testData.questions.find(q => q.id === questionId).points}`,
+            text: `${passedCount}/${totalCount} test cases passed. Score: ${sub.score?.toFixed(1) ?? 0}/${pts}`,
             confirmButtonColor: '#2563eb'
           });
         } else {
           Swal.fire({
             icon: 'warning',
-            title: 'Some Test Cases Failed',
-            text: `Passed: ${passedCount}/${totalCount}`,
+            title: `${passedCount}/${totalCount} Test Cases Passed`,
+            text: `Score: ${sub.score?.toFixed(1) ?? 0}/${pts}`,
             confirmButtonColor: '#f59e0b'
           });
         }
@@ -413,40 +442,60 @@ int main() {
       return [];
     }
   }, [testData?.allowedLanguages]);
+  const editorExtensions = useMemo(
+    () => getLanguageExtension(currentLangValue || 54),
+    [currentLangValue]
+  );
   if (!isOpen) return null;
 
   return (
     <AnimatePresence>
       <div
         ref={containerRef}
-        className="fixed inset-0 z-[9999] bg-gray-100 text-gray-900 flex flex-col"
+        className="fixed inset-0 z-[9999] bg-[#1a1a1a] text-gray-100 flex flex-col min-h-screen"
       >
-        {/* HEADER */}
-        <div className="bg-white border-b px-6 py-4 flex justify-between items-center">
-          <div className="flex gap-6 items-center">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Lock className="w-4 h-4 text-blue-600" />
-              {testData?.title || 'Coding Test'}
-            </h2>
-
+        {/* HEADER - LeetCode-style dark bar */}
+        <div className="flex-shrink-0 h-12 bg-[#262626] border-b border-[#3d3d3d] flex items-center justify-between px-4">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-[#f97316]" />
+              <span className="font-semibold text-white text-sm">{testData?.title || 'Coding Test'}</span>
+            </div>
             {!submittingRef.current && (
               <>
-                <span className="flex items-center gap-2 text-sm">
+                <span className="flex items-center gap-1.5 text-[#a3a3a3] text-sm">
                   <Clock className="w-4 h-4" />
                   {formatTime(timeLeft)}
                 </span>
-                <span className="text-sm text-gray-500">
-                  Question {currentQuestionIndex + 1}/{testData?.questions.length || 0}
-                </span>
+                {/* Question tabs - LeetCode style */}
+                <div className="flex items-center gap-1">
+                  {testData?.questions?.map((q, idx) => {
+                    const submission = submissions[q.id];
+                    const isCurrent = idx === currentQuestionIndex;
+                    return (
+                      <button
+                        key={q.id}
+                        onClick={() => { setCurrentQuestionIndex(idx); setRunOutput(null); }}
+                        className={`w-8 h-8 rounded-full text-xs font-medium flex items-center justify-center transition-colors ${
+                          isCurrent
+                            ? 'bg-[#f97316] text-white'
+                            : submission?.status === 'ACCEPTED'
+                            ? 'bg-[#22c55e]/20 text-[#22c55e] border border-[#22c55e]/40'
+                            : submission
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                            : 'bg-[#3d3d3d] text-[#a3a3a3] hover:bg-[#525252] hover:text-white'
+                        }`}
+                      >
+                        {idx + 1}
+                      </button>
+                    );
+                  })}
+                </div>
               </>
             )}
           </div>
-
-          {submittingRef.current && (
-            <button
-              onClick={onClose}
-              className="bg-blue-600 px-4 py-2 rounded text-white"
-            >
+          {(submitting || submittingRef.current) && (
+            <button onClick={onClose} className="text-sm text-[#a3a3a3] hover:text-white px-3 py-1.5 rounded">
               Close
             </button>
           )}
@@ -454,259 +503,193 @@ int main() {
 
         {/* WARNING BAR */}
         {warnings > 0 && !submittingRef.current && (
-          <div className="bg-yellow-100 border-b text-yellow-800 text-center py-2 text-sm">
-            <AlertTriangle className="inline w-4 h-4 mr-2" />
+          <div className="flex-shrink-0 bg-amber-900/40 border-b border-amber-600/50 text-amber-200 text-center py-1.5 text-sm flex items-center justify-center gap-2">
+            <AlertTriangle className="w-4 h-4" />
             Security warnings: {warnings}/{MAX_WARNINGS}
           </div>
         )}
 
-        {/* CONTENT */}
+        {/* CONTENT - Split view: Problem | Editor */}
         {loading ? (
           <div className="flex-1 flex items-center justify-center">
-            <Loader className="w-8 h-8 animate-spin text-blue-600" />
+            <Loader className="w-8 h-8 animate-spin text-[#f97316]" />
           </div>
         ) : testData ? (
-          <div className="flex-1 flex overflow-hidden">
-            {/* LEFT SIDEBAR - QUESTIONS */}
-            <div className="w-64 bg-white border-r overflow-y-auto">
-              <div className="p-4 space-y-2">
-                {testData.questions.map((q, idx) => {
-                  const submission = submissions[q.id];
-                  const isCurrent = idx === currentQuestionIndex;
-                  
-                  return (
-                    <button
-                      key={q.id}
-                      onClick={() => { setCurrentQuestionIndex(idx); setRunOutput(null); }}
-                      className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                        isCurrent
-                          ? 'bg-blue-50 border-blue-500'
-                          : submission
-                          ? submission.status === 'ACCEPTED'
-                            ? 'bg-green-50 border-green-500'
-                            : 'bg-yellow-50 border-yellow-500'
-                          : 'bg-white border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-sm">
-                          Q{idx + 1}. {q.title}
-                        </span>
-                        {submission && (
-                          submission.status === 'ACCEPTED' ? (
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                          ) : (
-                            <XCircle className="w-4 h-4 text-yellow-600" />
-                          )
-                        )}
-                      </div>
-                      {submission && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          Score: {submission.score?.toFixed(1)}/{q.points}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* MAIN CONTENT */}
-            <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex overflow-hidden min-h-0">
+            {/* LEFT: Problem description - LeetCode style */}
+            <div className="w-[45%] min-w-[320px] max-w-[560px] flex flex-col bg-[#1a1a1a] border-r border-[#3d3d3d] overflow-hidden">
               {currentQuestion && (
-                <>
-                  {/* QUESTION DESCRIPTION */}
-                  <div className="bg-white border-b p-6 overflow-y-auto max-h-64">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-xl font-semibold">{currentQuestion.title}</h3>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          currentQuestion.difficulty === 'EASY' ? 'bg-green-100 text-green-800' :
-                          currentQuestion.difficulty === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {currentQuestion.difficulty}
-                        </span>
-                        <span className="text-sm text-gray-600">
-                          {currentQuestion.points} points
-                        </span>
-                      </div>
-                    </div>
-                    
-                    <div className="prose max-w-none">
-                      <p className="whitespace-pre-wrap text-gray-700 mb-4">
-                        {currentQuestion.description}
-                      </p>
-                      
-                      {currentQuestion.constraints && (
-                        <div className="bg-gray-50 p-3 rounded mb-4">
-                          <strong className="text-sm">Constraints:</strong>
-                          <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">
-                            {currentQuestion.constraints}
-                          </p>
-                        </div>
-                      )}
-                      
-                      {currentQuestion.sampleInput && (
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                          <div>
-                            <strong className="text-sm">Sample Input:</strong>
-                            <pre className="bg-gray-50 p-3 rounded mt-1 text-sm font-mono overflow-x-auto">
-                              {currentQuestion.sampleInput}
-                            </pre>
-                          </div>
-                          {currentQuestion.sampleOutput && (
-                            <div>
-                              <strong className="text-sm">Sample Output:</strong>
-                              <pre className="bg-gray-50 p-3 rounded mt-1 text-sm font-mono overflow-x-auto">
-                                {currentQuestion.sampleOutput}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                <div className="flex-1 overflow-y-auto p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <h2 className="text-xl font-semibold text-white">{currentQuestion.title}</h2>
+                    <span className={`px-2.5 py-0.5 rounded text-xs font-medium ${
+                      currentQuestion.difficulty === 'EASY' ? 'bg-[#22c55e]/20 text-[#22c55e]' :
+                      currentQuestion.difficulty === 'MEDIUM' ? 'bg-[#f97316]/20 text-[#f97316]' :
+                      'bg-red-500/20 text-red-400'
+                    }`}>
+                      {currentQuestion.difficulty}
+                    </span>
+                    <span className="text-sm text-[#737373]">{currentQuestion.points} pts</span>
                   </div>
-
-                  {/* CODE EDITOR */}
-                  <div className="flex-1 flex flex-col bg-gray-50">
-                    {/* LANGUAGE SELECTOR */}
-                    <div className="bg-white border-b px-4 py-2 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <label className="text-sm font-medium">Language:</label>
-                        <select
-                          value={currentLangValue || ''}
-                          onChange={(e) => {
-                            const langId = parseInt(e.target.value);
-                            setSelectedLanguage(prev => ({
-                              ...prev,
-                              [currentQuestion.id]: langId
-                            }));
-                            setCode(prev => ({
-                              ...prev,
-                              [currentQuestion.id]: getDefaultCode(langId)
-                            }));
-                          }}
-                          className="px-3 py-1 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                          disabled={!!currentSubmission}
-                        >
-                          {allowedLangs.map(langId => (
-                            <option key={langId} value={langId}>
-                              {LANGUAGE_NAMES[langId]}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        {currentSubmission && (
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            currentSubmission.status === 'ACCEPTED'
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {currentSubmission.status}
-                          </span>
-                        )}
-                        <button
-                          onClick={() => handleRunCode(currentQuestion.id)}
-                          disabled={running[currentQuestion.id] || !!currentSubmission}
-                          className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {running[currentQuestion.id] ? (
-                            <Loader className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Play className="w-4 h-4" />
-                          )}
-                          Run Sample
-                        </button>
-                        <button
-                          onClick={() => handleSubmitQuestion(currentQuestion.id)}
-                          disabled={submitting || !!currentSubmission}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {submitting ? 'Submitting...' : 'Submit'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* RUN OUTPUT PANEL */}
-                    {runOutput && (
-                      <div
-                        className={`border-t px-4 py-3 ${
-                          runOutput.status === 'passed'
-                            ? 'bg-green-50 border-green-200'
-                            : runOutput.status === 'failed'
-                            ? 'bg-amber-50 border-amber-200'
-                            : 'bg-red-50 border-red-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span
-                            className={`font-semibold ${
-                              runOutput.status === 'passed'
-                                ? 'text-green-800'
-                                : runOutput.status === 'failed'
-                                ? 'text-amber-800'
-                                : 'text-red-800'
-                            }`}
-                          >
-                            {runOutput.title}
-                          </span>
-                          <button
-                            onClick={() => setRunOutput(null)}
-                            className="ml-auto text-gray-500 hover:text-gray-700 text-sm"
-                          >
-                            Dismiss
-                          </button>
-                        </div>
-                        <pre className="text-sm font-mono whitespace-pre-wrap break-words text-gray-800 mt-1">
-                          {runOutput.message}
-                        </pre>
-                        {runOutput.details && (
-                          <p className="text-xs text-gray-600 mt-2">{runOutput.details}</p>
-                        )}
+                  <div className="prose prose-invert prose-sm max-w-none">
+                    <p className="text-[#d4d4d4] whitespace-pre-wrap leading-relaxed mb-4">
+                      {currentQuestion.description}
+                    </p>
+                    {currentQuestion.constraints && (
+                      <div className="mb-4">
+                        <h4 className="text-sm font-semibold text-white mb-2">Constraints</h4>
+                        <p className="text-sm text-[#a3a3a3] whitespace-pre-wrap">{currentQuestion.constraints}</p>
                       </div>
                     )}
-
-                    {/* CODE EDITOR */}
-                    <div className="flex-1 p-4 min-h-0 flex flex-col overflow-hidden">
-                      <textarea
-                        value={currentCodeValue}
-                        onChange={(e) => {
-                          setCode(prev => ({
-                            ...prev,
-                            [currentQuestion.id]: e.target.value
-                          }));
-                        }}
-                        disabled={!!currentSubmission}
-                        placeholder="Write your code here..."
-                        className="w-full h-full p-4 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-                        style={{ fontFamily: 'monospace', tabSize: 2 }}
-                      />
-                    </div>
+                    {(() => {
+                      const samples = currentQuestion.sampleCases && Array.isArray(currentQuestion.sampleCases) && currentQuestion.sampleCases.length > 0
+                        ? currentQuestion.sampleCases
+                        : (currentQuestion.sampleInput || currentQuestion.sampleOutput) ? [{ input: currentQuestion.sampleInput || '', output: currentQuestion.sampleOutput || '' }] : [];
+                      return samples.length > 0 && (
+                        <div className="space-y-4">
+                          <h4 className="text-sm font-semibold text-white">Example{samples.length > 1 ? 's' : ''}</h4>
+                          {samples.map((sc, idx) => (
+                            <div key={idx} className="rounded-lg overflow-hidden border border-[#3d3d3d]">
+                              {samples.length > 1 && (
+                                <div className="bg-[#262626] px-3 py-1.5 text-xs text-[#737373] border-b border-[#3d3d3d]">Example {idx + 1}</div>
+                              )}
+                              <div className="bg-[#262626] px-3 py-2 text-xs text-[#737373] border-b border-[#3d3d3d]">Input</div>
+                              <pre className="p-3 text-sm font-mono text-[#d4d4d4] bg-[#1a1a1a] overflow-x-auto">
+                                {sc.input || '(empty)'}
+                              </pre>
+                              <div className="bg-[#262626] px-3 py-2 text-xs text-[#737373] border-t border-b border-[#3d3d3d]">Output</div>
+                              <pre className="p-3 text-sm font-mono text-[#d4d4d4] bg-[#1a1a1a] overflow-x-auto">
+                                {sc.output || '(empty)'}
+                              </pre>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
-                </>
+                </div>
               )}
+            </div>
+
+            {/* RIGHT: Code editor + console - LeetCode style */}
+            <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
+              {/* Editor toolbar */}
+              <div className="flex-shrink-0 h-10 bg-[#252526] border-b border-[#3d3d3d] flex items-center justify-between px-3">
+                <select
+                  value={currentLangValue || ''}
+                  onChange={(e) => {
+                    const langId = parseInt(e.target.value);
+                    setSelectedLanguage(prev => ({ ...prev, [currentQuestion?.id]: langId }));
+                    setCode(prev => ({ ...prev, [currentQuestion?.id]: getDefaultCode(langId) }));
+                  }}
+                  className="bg-[#3d3d3d] text-[#d4d4d4] text-sm px-3 py-1.5 rounded border-0 focus:ring-1 focus:ring-[#f97316]"
+                >
+                  {allowedLangs.map(langId => (
+                    <option key={langId} value={langId}>{LANGUAGE_NAMES[langId]}</option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-2">
+                  {currentSubmission && (
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      currentSubmission.status === 'ACCEPTED' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-amber-500/20 text-amber-400'
+                    }`}>
+                      {currentSubmission.passedCount != null && currentSubmission.totalCount != null
+                        ? `${currentSubmission.passedCount}/${currentSubmission.totalCount} passed`
+                        : currentSubmission.status}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleRunCode(currentQuestion?.id)}
+                    disabled={running[currentQuestion?.id]}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded border border-[#525252] text-[#d4d4d4] hover:bg-[#3d3d3d] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {running[currentQuestion?.id] ? <Loader className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                    Run
+                  </button>
+                  <button
+                    onClick={() => handleSubmitQuestion(currentQuestion?.id)}
+                    disabled={submitting}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-sm rounded bg-[#22c55e] text-white font-medium hover:bg-[#16a34a] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {submitting ? 'Submitting...' : 'Submit'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Code editor - dark theme */}
+              <div className="flex-1 min-h-0 overflow-hidden p-2">
+                <CodeEditorErrorBoundary
+                  fallback={
+                    <textarea
+                      value={currentCodeValue}
+                      onChange={(e) => setCode(prev => ({ ...prev, [currentQuestion?.id]: e.target.value }))}
+                      placeholder="// Write your code here"
+                      className="w-full h-full min-h-[200px] p-4 bg-[#1e1e1e] text-[#d4d4d4] font-mono text-sm resize-none border-0 rounded focus:outline-none"
+                    />
+                  }
+                >
+                  <CodeMirror
+                    value={currentCodeValue}
+                    onChange={(value) => setCode(prev => ({ ...prev, [currentQuestion?.id]: value }))}
+                    extensions={editorExtensions}
+                    theme={basicDark}
+                    editable={true}
+                    placeholder="// Write your code here"
+                    basicSetup={{
+                      lineNumbers: true,
+                      highlightActiveLineGutter: true,
+                      highlightActiveLine: true,
+                      foldGutter: false,
+                      bracketMatching: true,
+                      indentOnInput: true,
+                      tabSize: currentLangValue === 92 ? 4 : 2
+                    }}
+                    className="h-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto [&_.cm-content]:min-h-[200px] [&_.cm-gutters]:bg-[#252526] [&_.cm-gutters]:border-0"
+                    style={{ height: '100%', minHeight: 200 }}
+                  />
+                </CodeEditorErrorBoundary>
+              </div>
+
+              {/* Console / Run output - LeetCode style */}
+              <div className="flex-shrink-0 border-t border-[#3d3d3d]">
+                {runOutput ? (
+                  <div className={`px-4 py-3 max-h-32 overflow-y-auto ${
+                    runOutput.status === 'passed' ? 'bg-[#134e2e]/40 text-[#4ade80]' :
+                    runOutput.status === 'failed' ? 'bg-amber-900/30 text-amber-300' :
+                    'bg-red-900/30 text-red-300'
+                  }`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-semibold text-sm">{runOutput.title}</span>
+                      <button onClick={() => setRunOutput(null)} className="text-xs opacity-70 hover:opacity-100">Dismiss</button>
+                    </div>
+                    <pre className="text-sm font-mono whitespace-pre-wrap break-words">{runOutput.message}</pre>
+                    {runOutput.details && <p className="text-xs mt-1 opacity-80">{runOutput.details}</p>}
+                  </div>
+                ) : (
+                  <div className="h-12 px-4 flex items-center text-sm text-[#737373]">
+                    Run your code to see output here
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : null}
 
-        {/* FOOTER */}
-        {!submittingRef.current && (
-          <div className="fixed bottom-0 left-0 right-0 bg-white border-t px-6 py-4 flex justify-between z-[9000]">
-            <div className="flex items-center gap-4">
+        {/* FOOTER - Navigation */}
+        {!submittingRef.current && testData && (
+          <div className="flex-shrink-0 h-14 bg-[#262626] border-t border-[#3d3d3d] px-6 flex items-center justify-between">
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
+                onClick={() => setCurrentQuestionIndex(p => Math.max(0, p - 1))}
                 disabled={currentQuestionIndex === 0}
-                className="px-4 py-2 border rounded-lg disabled:opacity-50"
+                className="px-4 py-2 rounded text-sm border border-[#525252] text-[#d4d4d4] hover:bg-[#3d3d3d] disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Previous
               </button>
               <button
-                onClick={() => setCurrentQuestionIndex(prev => Math.min((testData?.questions.length || 1) - 1, prev + 1))}
-                disabled={currentQuestionIndex === (testData?.questions.length || 1) - 1}
-                className="px-4 py-2 border rounded-lg disabled:opacity-50"
+                onClick={() => setCurrentQuestionIndex(p => Math.min((testData?.questions?.length || 1) - 1, p + 1))}
+                disabled={currentQuestionIndex === (testData?.questions?.length || 1) - 1}
+                className="px-4 py-2 rounded text-sm border border-[#525252] text-[#d4d4d4] hover:bg-[#3d3d3d] disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Next
               </button>
@@ -714,40 +697,39 @@ int main() {
             <button
               onClick={handleFinalSubmit}
               disabled={submitting}
-              className="bg-blue-600 px-8 py-3 rounded text-white font-semibold disabled:opacity-50"
+              className="px-6 py-2.5 rounded text-sm font-semibold bg-[#22c55e] text-white hover:bg-[#16a34a] disabled:opacity-50"
             >
               Submit Test
             </button>
           </div>
         )}
 
-        {/* SECURITY MODAL */}
+        {/* SECURITY MODAL - dark theme */}
         {showSecurityModal && warnings <= MAX_WARNINGS && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[10000]">
-            <div className="bg-white rounded-lg p-6 w-[420px]">
-              <h3 className="font-semibold flex gap-2 mb-3">
-                <AlertTriangle className="text-yellow-500" />
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[10000]">
+            <div className="bg-[#262626] border border-[#3d3d3d] rounded-lg p-6 w-[420px]">
+              <h3 className="font-semibold flex gap-2 mb-3 text-white">
+                <AlertTriangle className="text-amber-400" />
                 Security Alert
               </h3>
-              <p className="text-sm text-gray-600 mb-6">
+              <p className="text-sm text-[#a3a3a3] mb-6">
                 You attempted to leave fullscreen.
                 <br />
                 Warnings left: {MAX_WARNINGS - warnings + 1}
               </p>
-
               <div className="flex justify-end gap-3">
                 <button
                   onClick={async () => {
                     setShowSecurityModal(false);
                     await enterFullscreen();
                   }}
-                  className="px-4 py-2 border rounded"
+                  className="px-4 py-2 rounded border border-[#525252] text-[#d4d4d4] hover:bg-[#3d3d3d]"
                 >
                   Continue Test
                 </button>
                 <button
                   onClick={handleFinalSubmit}
-                  className="px-4 py-2 bg-red-600 text-white rounded"
+                  className="px-4 py-2 bg-[#22c55e] text-white rounded hover:bg-[#16a34a]"
                 >
                   Submit Now
                 </button>

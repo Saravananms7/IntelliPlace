@@ -4,7 +4,13 @@ import { motion } from 'framer-motion';
 
 const Navbar = () => {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem('user')) || null;
+  let user = null;
+  try {
+    const stored = localStorage.getItem('user');
+    user = stored ? JSON.parse(stored) : null;
+  } catch {
+    user = null;
+  }
 
   const handleLogout = () => {
     localStorage.removeItem('user');

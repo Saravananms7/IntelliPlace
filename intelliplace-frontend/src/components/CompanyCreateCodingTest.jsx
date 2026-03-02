@@ -50,18 +50,27 @@ const CompanyCreateCodingTest = ({ isOpen, onClose, jobId, onCreated, editingTes
               
               // Load questions
               if (test.questions && Array.isArray(test.questions)) {
-                setQuestions(test.questions.map(q => ({
-                  id: q.id,
-                  title: q.title || '',
-                  description: q.description || '',
-                  difficulty: q.difficulty || 'MEDIUM',
-                  points: q.points || 10,
-                  testCases: Array.isArray(q.testCases) ? q.testCases : (q.testCases ? JSON.parse(q.testCases) : ['']),
-                  expectedOutputs: Array.isArray(q.expectedOutputs) ? q.expectedOutputs : (q.expectedOutputs ? JSON.parse(q.expectedOutputs) : ['']),
-                  sampleInput: q.sampleInput || '',
-                  sampleOutput: q.sampleOutput || '',
-                  constraints: q.constraints || ''
-                })));
+                setQuestions(test.questions.map(q => {
+                  let sampleCases = [];
+                  if (q.sampleCases && Array.isArray(q.sampleCases)) {
+                    sampleCases = q.sampleCases;
+                  } else if (q.sampleInput || q.sampleOutput) {
+                    sampleCases = [{ input: q.sampleInput || '', output: q.sampleOutput || '' }];
+                  } else {
+                    sampleCases = [{ input: '', output: '' }];
+                  }
+                  return {
+                    id: q.id,
+                    title: q.title || '',
+                    description: q.description || '',
+                    difficulty: q.difficulty || 'MEDIUM',
+                    points: q.points || 10,
+                    testCases: Array.isArray(q.testCases) ? q.testCases : (q.testCases ? JSON.parse(q.testCases) : ['']),
+                    expectedOutputs: Array.isArray(q.expectedOutputs) ? q.expectedOutputs : (q.expectedOutputs ? JSON.parse(q.expectedOutputs) : ['']),
+                    sampleCases,
+                    constraints: q.constraints || ''
+                  };
+                }));
               } else {
                 setQuestions([]);
               }
@@ -96,8 +105,7 @@ const CompanyCreateCodingTest = ({ isOpen, onClose, jobId, onCreated, editingTes
         points: 10,
         testCases: [''],
         expectedOutputs: [''],
-        sampleInput: '',
-        sampleOutput: '',
+        sampleCases: [{ input: '', output: '' }],
         constraints: ''
       }
     ]);
@@ -127,6 +135,28 @@ const CompanyCreateCodingTest = ({ isOpen, onClose, jobId, onCreated, editingTes
     const updated = [...questions];
     updated[questionIndex].testCases.push('');
     updated[questionIndex].expectedOutputs.push('');
+    setQuestions(updated);
+  };
+
+  const addSampleCase = (questionIndex) => {
+    const updated = [...questions];
+    if (!updated[questionIndex].sampleCases) updated[questionIndex].sampleCases = [{ input: '', output: '' }];
+    else updated[questionIndex].sampleCases.push({ input: '', output: '' });
+    setQuestions(updated);
+  };
+
+  const removeSampleCase = (questionIndex, sampleIndex) => {
+    const updated = [...questions];
+    updated[questionIndex].sampleCases.splice(sampleIndex, 1);
+    if (updated[questionIndex].sampleCases.length === 0) {
+      updated[questionIndex].sampleCases = [{ input: '', output: '' }];
+    }
+    setQuestions(updated);
+  };
+
+  const updateSampleCase = (questionIndex, sampleIndex, field, value) => {
+    const updated = [...questions];
+    updated[questionIndex].sampleCases[sampleIndex][field] = value;
     setQuestions(updated);
   };
 
@@ -195,8 +225,11 @@ const CompanyCreateCodingTest = ({ isOpen, onClose, jobId, onCreated, editingTes
             points: q.points,
             testCases: q.testCases,
             expectedOutputs: q.expectedOutputs,
-            sampleInput: q.sampleInput || null,
-            sampleOutput: q.sampleOutput || null,
+            sampleCases: (q.sampleCases || []).filter(sc => sc?.input?.trim() || sc?.output?.trim()).length > 0
+              ? (q.sampleCases || []).map(sc => ({ input: sc.input || '', output: sc.output || '' }))
+              : null,
+            sampleInput: (q.sampleCases?.[0]?.input) || null,
+            sampleOutput: (q.sampleCases?.[0]?.output) || null,
             constraints: q.constraints || null
           }))
         })
@@ -420,30 +453,51 @@ const CompanyCreateCodingTest = ({ isOpen, onClose, jobId, onCreated, editingTes
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Sample Input
+                {/* Sample Cases - visible to students for Run Sample */}
+                <div className="border-t pt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Sample Cases <span className="text-gray-500 font-normal">(students can run these)</span>
                     </label>
-                    <textarea
-                      value={question.sampleInput}
-                      onChange={(e) => updateQuestion(qIndex, 'sampleInput', e.target.value)}
-                      placeholder="Sample input..."
-                      rows="2"
-                      className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                    />
+                    <button
+                      onClick={() => addSampleCase(qIndex)}
+                      className="flex items-center gap-1 px-2 py-1 text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 rounded"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Add Sample Case
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Sample Output
-                    </label>
-                    <textarea
-                      value={question.sampleOutput}
-                      onChange={(e) => updateQuestion(qIndex, 'sampleOutput', e.target.value)}
-                      placeholder="Sample output..."
-                      rows="2"
-                      className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                    />
+                  <div className="space-y-2">
+                    {(question.sampleCases || [{ input: '', output: '' }]).map((sc, scIndex) => (
+                      <div key={scIndex} className="grid grid-cols-2 gap-2 p-2 bg-gray-50 rounded-lg">
+                        <div>
+                          <input
+                            type="text"
+                            value={sc.input}
+                            onChange={(e) => updateSampleCase(qIndex, scIndex, 'input', e.target.value)}
+                            placeholder="Sample input"
+                            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={sc.output}
+                            onChange={(e) => updateSampleCase(qIndex, scIndex, 'output', e.target.value)}
+                            placeholder="Expected output"
+                            className="flex-1 p-2 border rounded focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                          />
+                          {(question.sampleCases?.length || 1) > 1 && (
+                            <button
+                              onClick={() => removeSampleCase(qIndex, scIndex)}
+                              className="px-2 text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 

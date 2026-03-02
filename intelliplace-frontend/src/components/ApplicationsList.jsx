@@ -1,19 +1,32 @@
 import { useState, useEffect } from 'react';
-import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle } from 'lucide-react';
+import { FileCheck, Download, Mail, Phone, ChevronDown, ChevronUp, User, FileDown, Sparkles, XCircle, Code } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Swal from 'sweetalert2';
+import { API_BASE_URL } from '../config.js';
 
 const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionMessage, setActionMessage] = useState(null);
+  const [jobStatus, setJobStatus] = useState(initialJobStatus || 'OPEN');
+  const [confirming, setConfirming] = useState(false);
+  const [previewCV, setPreviewCV] = useState(null);
+  const [expandedApp, setExpandedApp] = useState(null);
+  const [codingSubmissions, setCodingSubmissions] = useState({});
+  const [viewingCodeFor, setViewingCodeFor] = useState(null);
+  const [atsLoading, setAtsLoading] = useState(false);
+  const [atsProgress, setAtsProgress] = useState(null);
+  const [closeLoading, setCloseLoading] = useState(false);
+  const [shortlistAllLoading, setShortlistAllLoading] = useState(false);
 
   // Fetch applications for a job
   const fetchApplications = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`http://localhost:5000/api/jobs/${jobId}/applicants`, {
+      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/applicants`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
@@ -35,18 +48,43 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     if (jobId) fetchApplications();
   }, [jobId]);
 
-  const [actionLoading, setActionLoading] = useState(false);
-  const [actionMessage, setActionMessage] = useState(null);
-  const [jobStatus, setJobStatus] = useState(initialJobStatus || 'OPEN');
-  const [confirming, setConfirming] = useState(false);
+  // Auto-fetch coding submissions when user expands an application
+  useEffect(() => {
+    if (!expandedApp || !jobId || applications.length === 0) return;
+    const app = applications.find(a => a.id === expandedApp);
+    if (app?.student?.id) fetchCodingSubmissions(app);
+  }, [expandedApp, jobId, applications]);
 
-  const [previewCV, setPreviewCV] = useState(null);
-  const [expandedApp, setExpandedApp] = useState(null);
-  const [atsLoading, setAtsLoading] = useState(false);
-  const [atsProgress, setAtsProgress] = useState(null);
-  const [closeLoading, setCloseLoading] = useState(false);
-  const [shortlistAllLoading, setShortlistAllLoading] = useState(false);
-  
+  const fetchCodingSubmissions = async (app) => {
+    if (!app?.student?.id) return;
+    if (codingSubmissions[app.id]?.submissions) return;
+    setCodingSubmissions(prev => ({ ...prev, [app.id]: { ...prev[app.id], loading: true } }));
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/jobs/${jobId}/coding-test/submissions/${app.student.id}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setCodingSubmissions(prev => ({
+          ...prev,
+          [app.id]: { loading: false, submissions: json.data?.submissions || [] }
+        }));
+      } else {
+        setCodingSubmissions(prev => ({
+          ...prev,
+          [app.id]: { loading: false, submissions: [], error: json.message || 'Failed to load' }
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch coding submissions:', err);
+      setCodingSubmissions(prev => ({
+        ...prev,
+        [app.id]: { loading: false, submissions: [], error: err.message }
+      }));
+    }
+  };
+
   const downloadCV = (application) => {
     if (!application.cvUrl) {
       alert('No CV available for this applicant');
@@ -61,8 +99,8 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     if (isPDF) {
       setPreviewCV({
         url: cvUrl,
-        name: `${application.student.name}'s CV`,
-        studentName: application.student.name,
+        name: `${application.student?.name || 'Applicant'}'s CV`,
+        studentName: application.student?.name || 'Applicant',
       });
     } else {
 
@@ -77,19 +115,19 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     }
 
     const exportData = applications.map((app, index) => {
-      const displayCgpa = app.cgpa || app.student.cgpa || 'N/A';
-      const displayBacklog = app.backlog !== null ? app.backlog : (app.student.backlog !== null ? app.student.backlog : 'N/A');
+      const displayCgpa = app.cgpa || app.student?.cgpa || 'N/A';
+      const displayBacklog = app.backlog !== null ? app.backlog : (app.student?.backlog != null ? app.student.backlog : 'N/A');
       
       return {
         'S.No': index + 1,
-        'Name': app.student.name || 'N/A',
-        'Roll Number': app.student.rollNumber || 'N/A',
-        'Email': app.student.email || 'N/A',
-        'Phone': app.student.phone || 'N/A',
+        'Name': app.student?.name || 'N/A',
+        'Roll Number': app.student?.rollNumber || 'N/A',
+        'Email': app.student?.email || 'N/A',
+        'Phone': app.student?.phone || 'N/A',
         'CGPA': app.cgpa || 'N/A',
-       // 'CGPA (Profile)': app.student.cgpa || 'N/A',
+       // 'CGPA (Profile)': app.student?.cgpa || 'N/A',
          'Backlog (Application)': app.backlog !== null ? app.backlog : 'N/A',
-         'Backlog (Profile)': app.student.backlog !== null ? app.student.backlog : 'N/A',
+         'Backlog (Profile)': app.student?.backlog != null ? app.student.backlog : 'N/A',
          //'Status': app.status || 'N/A',
          'Applied Date': new Date(app.createdAt).toLocaleString(),
          'CV Available': app.cvUrl ? 'Yes' : 'No',
@@ -130,10 +168,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       allowOutsideClick: false,
     });
 
-    if (!result.isConfirmed) {
-      setConfirmClose(false);
-      return;
-    }
+    if (!result.isConfirmed) return;
 
     setCloseLoading(true);
     setActionMessage(null);
@@ -150,7 +185,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     
     try {
       const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/close`,
+        `${API_BASE_URL}/jobs/${jobId}/close`,
         {
           method: 'POST',
           headers: {
@@ -236,7 +271,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     });
 
     try {
-      const res = await fetch(`http://localhost:5000/api/jobs/${jobId}/shortlist-all`, {
+      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/shortlist-all`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -299,7 +334,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       setAtsProgress(`Connecting to AI service...`);
       
       const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/shortlist-ats`,
+        `${API_BASE_URL}/jobs/${jobId}/shortlist-ats`,
         {
           method: 'POST',
           headers: {
@@ -350,10 +385,14 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-        <div className="p-6 border-b">
+  const modalContent = (
+    <div 
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+      style={{ zIndex: 99999 }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col border border-gray-200">
+        <div className="p-6 border-b border-gray-200 flex-shrink-0">
           <div className="flex justify-between items-center gap-4">
             <h2 className="text-2xl font-semibold text-gray-800">Applications</h2>
             <div className="ml-auto flex items-center gap-3">
@@ -411,7 +450,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                       setActionMessage(null);
                       try {
                         const res = await fetch(
-                          `http://localhost:5000/api/jobs/${jobId}/shortlist`,
+                          `${API_BASE_URL}/jobs/${jobId}/shortlist`,
                           {
                             method: 'POST',
                             headers: {
@@ -454,14 +493,18 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                   </button>
                 </div>
               )}
-              <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+              <button 
+                onClick={onClose} 
+                className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg text-2xl font-bold leading-none"
+                aria-label="Close"
+              >
                 ×
               </button>
             </div>
           </div>
         </div>
 
-        <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+        <div className="p-6 overflow-y-auto flex-1 min-h-[200px] bg-gray-50">
           {atsProgress && (
             <div className="p-3 mb-4 rounded bg-blue-50 text-blue-800 border border-blue-200">
               <div className="flex items-center gap-2">
@@ -484,24 +527,26 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
           )}
 
           {loading ? (
-            <div className="text-center py-12">
-              <p className="text-gray-600">Loading applications...</p>
+            <div className="text-center py-16">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4" />
+              <p className="text-gray-700 font-medium">Loading applications...</p>
             </div>
           ) : error ? (
-            <div className="text-center py-12">
-              <p className="text-red-600">{error}</p>
+            <div className="text-center py-16 bg-red-50 rounded-lg border border-red-200">
+              <p className="text-red-700 font-medium">{error}</p>
+              <p className="text-sm text-gray-600 mt-2">Check that the backend is running and you are logged in.</p>
             </div>
           ) : applications.length === 0 ? (
-            <div className="text-center py-12">
+            <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
               <FileCheck className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600">No applications yet</p>
+              <p className="text-gray-700 font-medium">No applications yet</p>
             </div>
           ) : (
             <div className="space-y-2">
               {applications.map((app, index) => {
                 const isExpanded = expandedApp === app.id;
-                const displayCgpa = app.cgpa || app.student.cgpa || 'N/A';
-                const displayBacklog = app.backlog !== null ? app.backlog : (app.student.backlog !== null ? app.student.backlog : 'N/A');
+                const displayCgpa = app.cgpa || app.student?.cgpa || 'N/A';
+                const displayBacklog = app.backlog !== null ? app.backlog : (app.student?.backlog != null ? app.student.backlog : 'N/A');
                 
                 return (
                   <div key={app.id} className="border rounded-lg overflow-hidden hover:shadow-md transition-shadow">
@@ -517,15 +562,15 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                           <div className="flex items-center gap-2">
                             <User className="w-4 h-4 text-gray-400" />
                             <div>
-                              <p className="font-semibold text-gray-800">{app.student.name}</p>
-                              {app.student.rollNumber && (
+                              <p className="font-semibold text-gray-800">{app.student?.name || 'Unknown'}</p>
+                              {app.student?.rollNumber && (
                                 <p className="text-xs text-gray-500">Roll: {app.student.rollNumber}</p>
                               )}
                             </div>
                           </div>
                           <div className="hidden md:block">
                             <p className="text-xs text-gray-500">Email</p>
-                            <p className="text-sm text-gray-700 truncate">{app.student.email}</p>
+                            <p className="text-sm text-gray-700 truncate">{app.student?.email || '—'}</p>
                           </div>
                           <div>
                             <p className="text-xs text-gray-500">CGPA</p>
@@ -572,24 +617,24 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                         <p className="text-sm text-gray-600 flex items-center gap-2">
                           <Mail className="w-4 h-4" />
                           <a
-                            href={`mailto:${app.student.email}`}
+                            href={`mailto:${app.student?.email || ''}`}
                             className="hover:text-red-600"
                           >
-                            {app.student.email}
+                            {app.student?.email || '—'}
                           </a>
                         </p>
-                        {app.student.phone && (
+                        {app.student?.phone && (
                           <p className="text-sm text-gray-600 flex items-center gap-2">
                             <Phone className="w-4 h-4" />
                             <a
-                              href={`tel:${app.student.phone}`}
+                              href={`tel:${app.student?.phone}`}
                               className="hover:text-red-600"
                             >
-                              {app.student.phone}
+                              {app.student?.phone}
                             </a>
                           </p>
                         )}
-                              {app.student.rollNumber && (
+                              {app.student?.rollNumber && (
                                 <p className="text-sm text-gray-600">
                                   <span className="font-medium">Roll Number:</span> {app.student.rollNumber}
                                 </p>
@@ -606,7 +651,7 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                                   <p className="text-sm font-medium text-gray-800">
                                     {displayCgpa}
                             </p>
-                            {app.cgpa !== app.student.cgpa && app.student.cgpa && (
+                            {app.cgpa !== app.student?.cgpa && app.student?.cgpa && (
                               <span className="text-xs text-gray-500">
                                 (Profile: {app.student.cgpa})
                               </span>
@@ -619,8 +664,8 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                                   <p className="text-sm font-medium text-gray-800">
                                     {displayBacklog}
                             </p>
-                            {app.backlog !== app.student.backlog &&
-                              app.student.backlog !== null && (
+                            {app.backlog !== app.student?.backlog &&
+                              app.student?.backlog != null && (
                                 <span className="text-xs text-gray-500">
                                   (Profile: {app.student.backlog})
                                 </span>
@@ -642,6 +687,80 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
                             </div>
                             </div>
                           </div>
+
+                          {/* Coding Test Submissions - for applicants who took the test */}
+                          <div className="mt-4 pt-4 border-t">
+                              <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                <Code className="w-4 h-4" />
+                                Coding Test Submissions
+                              </h4>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); fetchCodingSubmissions(app); }}
+                                disabled={codingSubmissions[app.id]?.loading}
+                                className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                              >
+                                {codingSubmissions[app.id]?.loading ? 'Loading...' : 'View Submitted Code'}
+                              </button>
+                              {codingSubmissions[app.id]?.submissions && codingSubmissions[app.id].submissions.length > 0 && (
+                                <div className="mt-3 space-y-3">
+                                  {codingSubmissions[app.id].submissions.map((sub) => {
+                                    const passedCount = sub.testCaseResults?.filter(r => r.passed).length ?? 0;
+                                    const totalCount = sub.testCaseResults?.length ?? 0;
+                                    return (
+                                      <div key={sub.id} className="border rounded-lg p-4 bg-white shadow-sm">
+                                        <div className="flex items-start justify-between gap-2 mb-2">
+                                          <span className="font-semibold text-gray-800">{sub.questionTitle}</span>
+                                          <span className={`text-xs px-2 py-1 rounded shrink-0 ${
+                                            sub.status === 'ACCEPTED' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+                                          }`}>
+                                            {totalCount > 0 ? `${passedCount}/${totalCount} passed` : sub.status}
+                                          </span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-3 text-xs text-gray-600 mb-2">
+                                          <span>Language: <strong>{sub.languageName || 'N/A'}</strong></span>
+                                          {sub.score != null && <span>Score: <strong>{sub.score?.toFixed(1)}{sub.questionPoints != null ? `/${sub.questionPoints}` : ''} pts</strong></span>}
+                                          {sub.executionTime != null && <span>Time: <strong>{sub.executionTime?.toFixed(2)}s</strong></span>}
+                                          {sub.memoryUsed != null && <span>Memory: <strong>{(sub.memoryUsed / 1024).toFixed(1)} KB</strong></span>}
+                                          <span>Submitted: <strong>{new Date(sub.createdAt).toLocaleString()}</strong></span>
+                                        </div>
+                                        {sub.errorMessage && (
+                                          <div className="mb-2 p-2 bg-red-50 text-red-700 text-xs rounded">
+                                            Error: {sub.errorMessage}
+                                          </div>
+                                        )}
+                                        {sub.testCaseResults && sub.testCaseResults.length > 0 && (
+                                          <div className="mb-2">
+                                            <p className="text-xs font-medium text-gray-600 mb-1">Test case results:</p>
+                                            <div className="space-y-1 max-h-24 overflow-y-auto">
+                                              {sub.testCaseResults.map((tc, i) => (
+                                                <div key={i} className={`text-xs p-1.5 rounded flex items-center gap-2 ${tc.passed ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                                                  <span className="font-mono">#{tc.testCase}</span>
+                                                  <span>{tc.passed ? '✓ Passed' : `✗ ${tc.status || 'Failed'}`}</span>
+                                                  {!tc.passed && tc.expected != null && <span className="truncate">Expected: {String(tc.expected).slice(0, 30)}...</span>}
+                                                  {!tc.passed && tc.actual != null && <span className="truncate">Got: {String(tc.actual).slice(0, 30)}...</span>}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        <pre className="text-xs font-mono bg-gray-50 p-2 rounded max-h-28 overflow-y-auto whitespace-pre-wrap break-words">{sub.code?.slice(0, 400)}{sub.code?.length > 400 ? '...' : ''}</pre>
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); setViewingCodeFor({ appId: app.id, submission: sub }); }}
+                                          className="mt-2 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                                        >
+                                          View full code & details
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {codingSubmissions[app.id]?.submissions && codingSubmissions[app.id].submissions.length === 0 && !codingSubmissions[app.id]?.loading && (
+                                <p className="text-sm text-gray-500 mt-2">
+                                  {codingSubmissions[app.id]?.error || 'No coding submissions yet'}
+                                </p>
+                              )}
+                            </div>
 
                         <div className="mt-4 pt-4 border-t flex items-center justify-between">
                           <div className="flex items-center gap-3">
@@ -695,6 +814,79 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       </div>
 
       
+      {/* Full code & results view modal */}
+      {viewingCodeFor && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex-shrink-0 p-4 border-b">
+              <div className="flex justify-between items-start gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-800">
+                    {viewingCodeFor.submission.questionTitle}
+                  </h3>
+                  <div className="flex flex-wrap gap-3 mt-1 text-sm text-gray-600">
+                    <span>Language: <strong>{viewingCodeFor.submission.languageName || 'N/A'}</strong></span>
+                    <span>Status: <strong className={viewingCodeFor.submission.status === 'ACCEPTED' ? 'text-green-600' : 'text-amber-600'}>{viewingCodeFor.submission.status}</strong></span>
+                    {viewingCodeFor.submission.score != null && (
+                      <span>Score: <strong>{viewingCodeFor.submission.score?.toFixed(1)}{viewingCodeFor.submission.questionPoints != null ? `/${viewingCodeFor.submission.questionPoints}` : ''} pts</strong></span>
+                    )}
+                    {viewingCodeFor.submission.executionTime != null && <span>Time: <strong>{viewingCodeFor.submission.executionTime?.toFixed(2)}s</strong></span>}
+                    {viewingCodeFor.submission.memoryUsed != null && <span>Memory: <strong>{(viewingCodeFor.submission.memoryUsed / 1024).toFixed(1)} KB</strong></span>}
+                    <span>Submitted: <strong>{new Date(viewingCodeFor.submission.createdAt).toLocaleString()}</strong></span>
+                  </div>
+                  {viewingCodeFor.submission.errorMessage && (
+                    <div className="mt-2 p-2 bg-red-50 text-red-700 text-sm rounded">
+                      Error: {viewingCodeFor.submission.errorMessage}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => setViewingCodeFor(null)} className="text-gray-500 hover:text-gray-700 text-2xl leading-none shrink-0">
+                  ×
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4 space-y-4">
+              {viewingCodeFor.submission.testCaseResults && viewingCodeFor.submission.testCaseResults.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Test Case Results</h4>
+                  <div className="space-y-2">
+                    {viewingCodeFor.submission.testCaseResults.map((tc, i) => (
+                      <div key={i} className={`border rounded-lg p-3 ${tc.passed ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium">Test #{tc.testCase}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${tc.passed ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
+                            {tc.passed ? 'Passed' : (tc.status || 'Failed')}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-mono">
+                          <div><span className="text-gray-500">Input:</span><pre className="mt-0.5 bg-white p-1.5 rounded overflow-x-auto">{tc.input || '(empty)'}</pre></div>
+                          <div><span className="text-gray-500">Expected:</span><pre className="mt-0.5 bg-white p-1.5 rounded overflow-x-auto">{tc.expected ?? '(empty)'}</pre></div>
+                          <div><span className="text-gray-500">Actual:</span><pre className="mt-0.5 bg-white p-1.5 rounded overflow-x-auto">{tc.actual ?? '(empty)'}</pre></div>
+                        </div>
+                        {tc.error && !tc.passed && <p className="text-xs text-red-600 mt-1">Error: {tc.error}</p>}
+                        {(tc.executionTime != null || tc.memoryUsed != null) && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {tc.executionTime != null && `Time: ${tc.executionTime}s`}
+                            {tc.executionTime != null && tc.memoryUsed != null && ' • '}
+                            {tc.memoryUsed != null && `Memory: ${(tc.memoryUsed / 1024).toFixed(1)} KB`}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">Submitted Code</h4>
+                <pre className="text-sm font-mono bg-gray-50 p-4 rounded-lg whitespace-pre-wrap break-words overflow-x-auto">
+                  {viewingCodeFor.submission.code}
+                </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {previewCV && (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-4xl h-[80vh] flex flex-col">
@@ -737,6 +929,8 @@ const ApplicationsList = ({ jobId, onClose, initialJobStatus }) => {
       )}
     </div>
   );
+
+  return modalContent;
 };
 
 export default ApplicationsList;

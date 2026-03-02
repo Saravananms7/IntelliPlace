@@ -1,3 +1,4 @@
+import { Component } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 // Pages
@@ -13,6 +14,35 @@ import CompanyDashboard from './pages/Company/CompanyDashboard';
 import RecruitmentProcess from './pages/Company/RecruitmentProcess';
 import AdminDashboard from './pages/Admin/AdminDashboard';
 import { GlowingEffectDemo } from "./components/GlowingEffectDemo";
+
+class ErrorBoundary extends Component {
+  state = { hasError: false, error: null };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error) {
+    console.error('Route error:', error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-100 flex items-center justify-center p-8">
+          <div className="bg-white rounded-lg shadow-lg p-8 max-w-md">
+            <h2 className="text-xl font-semibold text-red-600 mb-2">Something went wrong</h2>
+            <p className="text-gray-600 mb-4">{this.state.error?.message || 'An error occurred'}</p>
+            <button
+              onClick={() => window.location.href = '/company/dashboard'}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function App() {
   return (
@@ -32,7 +62,7 @@ function App() {
         <Route path="/company/login" element={<CompanyLogin />} />
         <Route path="/company/register" element={<CompanyRegister />} />
         <Route path="/company/dashboard" element={<CompanyDashboard />} />
-        <Route path="/company/recruitment/:jobId" element={<RecruitmentProcess />} />
+        <Route path="/company/recruitment/:jobId" element={<ErrorBoundary><RecruitmentProcess /></ErrorBoundary>} />
 
         {/* Admin Routes */}
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
