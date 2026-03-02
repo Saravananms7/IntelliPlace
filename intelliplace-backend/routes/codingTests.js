@@ -82,17 +82,24 @@ router.post('/:jobId/coding-test', authenticateToken, authorizeCompany, async (r
         timeLimit: timeLimit || 60,
         cutoff: cutoff || null,
         questions: {
-          create: questions.map(q => ({
-            title: q.title,
-            description: q.description,
-            difficulty: q.difficulty || 'MEDIUM',
-            points: q.points || 10,
-            testCases: JSON.stringify(q.testCases),
-            expectedOutputs: JSON.stringify(q.expectedOutputs),
-            sampleInput: q.sampleInput || null,
-            sampleOutput: q.sampleOutput || null,
-            constraints: q.constraints || null
-          }))
+          create: questions.map(q => {
+            const sampleCases = q.sampleCases && Array.isArray(q.sampleCases) && q.sampleCases.length > 0
+              ? q.sampleCases.filter(sc => sc?.input?.trim() || sc?.output?.trim())
+              : null;
+            const firstSample = sampleCases?.[0];
+            return {
+              title: q.title,
+              description: q.description,
+              difficulty: q.difficulty || 'MEDIUM',
+              points: q.points || 10,
+              testCases: JSON.stringify(q.testCases),
+              expectedOutputs: JSON.stringify(q.expectedOutputs),
+              sampleInput: firstSample?.input || q.sampleInput || null,
+              sampleOutput: firstSample?.output || q.sampleOutput || null,
+              sampleCases: sampleCases ? JSON.stringify(sampleCases) : null,
+              constraints: q.constraints || null
+            };
+          })
         }
       },
       include: {
@@ -235,13 +242,17 @@ router.get('/:jobId/coding-test', authenticateToken, async (req, res) => {
     const testData = {
       ...codingTest,
       allowedLanguages: JSON.parse(codingTest.allowedLanguages),
-      questions: codingTest.questions.map(q => ({
-        ...q,
-        testCases: userType === 'company' ? JSON.parse(q.testCases) : undefined, // Hide test cases from students
-        expectedOutputs: userType === 'company' ? JSON.parse(q.expectedOutputs) : undefined, // Hide expected outputs from students
-        sampleInput: q.sampleInput,
-        sampleOutput: q.sampleOutput
-      }))
+      questions: codingTest.questions.map(q => {
+        const sampleCases = q.sampleCases ? (typeof q.sampleCases === 'string' ? JSON.parse(q.sampleCases) : q.sampleCases) : null;
+        return {
+          ...q,
+          testCases: userType === 'company' ? JSON.parse(q.testCases) : undefined, // Hide test cases from students
+          expectedOutputs: userType === 'company' ? JSON.parse(q.expectedOutputs) : undefined, // Hide expected outputs from students
+          sampleInput: q.sampleInput,
+          sampleOutput: q.sampleOutput,
+          sampleCases: sampleCases && Array.isArray(sampleCases) ? sampleCases : (q.sampleInput || q.sampleOutput ? [{ input: q.sampleInput || '', output: q.sampleOutput || '' }] : [])
+        };
+      })
     };
 
     res.json({ success: true, data: testData });
@@ -533,24 +544,31 @@ router.put('/:jobId/coding-test', authenticateToken, authorizeCompany, async (re
     if (questions && Array.isArray(questions)) {
       // Delete existing questions
       await prisma.codingQuestion.deleteMany({
-        where: { codingTestId: codingTest.id }
+        where: { testId: codingTest.id }
       });
 
       // Create new questions
-      await prisma.codingQuestion.createMany({
-        data: questions.map(q => ({
-          codingTestId: codingTest.id,
-          title: q.title,
-          description: q.description,
-          difficulty: q.difficulty || 'MEDIUM',
-          points: q.points || 10,
-          testCases: JSON.stringify(q.testCases || []),
-          expectedOutputs: JSON.stringify(q.expectedOutputs || []),
-          sampleInput: q.sampleInput || null,
-          sampleOutput: q.sampleOutput || null,
-          constraints: q.constraints || null
-        }))
-      });
+      for (const q of questions) {
+        const sampleCases = q.sampleCases && Array.isArray(q.sampleCases) && q.sampleCases.length > 0
+          ? q.sampleCases.filter(sc => sc?.input?.trim() || sc?.output?.trim())
+          : null;
+        const firstSample = sampleCases?.[0];
+        await prisma.codingQuestion.create({
+          data: {
+            testId: codingTest.id,
+            title: q.title,
+            description: q.description,
+            difficulty: q.difficulty || 'MEDIUM',
+            points: q.points || 10,
+            testCases: JSON.stringify(q.testCases || []),
+            expectedOutputs: JSON.stringify(q.expectedOutputs || []),
+            sampleInput: firstSample?.input || q.sampleInput || null,
+            sampleOutput: firstSample?.output || q.sampleOutput || null,
+            sampleCases: sampleCases ? JSON.stringify(sampleCases) : null,
+            constraints: q.constraints || null
+          }
+        });
+      }
     }
 
     // Fetch updated test with questions
@@ -626,7 +644,11 @@ router.post('/:jobId/coding-test/run-sample', authenticateToken, authorizeStuden
     }
 
     let sampleInput, sampleOutput;
-    if (question.sampleInput && question.sampleOutput) {
+    const sampleCases = question.sampleCases ? (typeof question.sampleCases === 'string' ? JSON.parse(question.sampleCases) : question.sampleCases) : null;
+    if (sampleCases && Array.isArray(sampleCases) && sampleCases.length > 0 && (sampleCases[0]?.input || sampleCases[0]?.output)) {
+      sampleInput = sampleCases[0].input || '';
+      sampleOutput = sampleCases[0].output || '';
+    } else if (question.sampleInput && question.sampleOutput) {
       sampleInput = question.sampleInput;
       sampleOutput = question.sampleOutput;
     } else {
@@ -778,6 +800,73 @@ router.post('/:jobId/coding-test/submit', authenticateToken, authorizeStudent, a
   } catch (error) {
     console.error('Error submitting code:', error);
     res.status(500).json({ success: false, message: 'Server error submitting code' });
+  }
+});
+
+// Get coding submissions for a student (Company/Recruiter view)
+router.get('/:jobId/coding-test/submissions/:studentId', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+    const studentId = parseInt(req.params.studentId);
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) {
+      return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+    }
+
+    const codingTest = await prisma.codingTest.findUnique({ where: { jobId } });
+    if (!codingTest) {
+      return res.json({ success: true, data: { submissions: [] } });
+    }
+
+    const submissions = await prisma.codingSubmission.findMany({
+      where: {
+        testId: codingTest.id,
+        studentId
+      },
+      include: {
+        test: { include: { questions: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Get latest submission per question (most recent code)
+    const byQuestion = {};
+    for (const sub of submissions) {
+      if (!byQuestion[sub.questionId] || new Date(sub.createdAt) > new Date(byQuestion[sub.questionId].createdAt)) {
+        byQuestion[sub.questionId] = sub;
+      }
+    }
+
+    const LANGUAGE_NAMES = { 50: 'C', 54: 'C++', 92: 'Python', 71: 'Python', 91: 'Java' };
+    const submissionsWithDetails = Object.values(byQuestion).map(sub => {
+      const question = sub.test?.questions?.find(q => q.id === sub.questionId);
+      return {
+        id: sub.id,
+        questionId: sub.questionId,
+        questionTitle: question?.title || 'Question',
+        questionPoints: question?.points ?? null,
+        code: sub.code,
+        languageId: sub.languageId,
+        languageName: LANGUAGE_NAMES[sub.languageId] || `Lang ${sub.languageId}`,
+        status: sub.status,
+        score: sub.score,
+        executionTime: sub.executionTime,
+        memoryUsed: sub.memoryUsed,
+        errorMessage: sub.errorMessage,
+        testCaseResults: sub.testCaseResults ? JSON.parse(sub.testCaseResults) : null,
+        createdAt: sub.createdAt
+      };
+    });
+
+    res.json({
+      success: true,
+      data: { submissions: submissionsWithDetails }
+    });
+  } catch (error) {
+    console.error('Error fetching coding submissions for recruiter:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching coding submissions' });
   }
 });
 

@@ -46,9 +46,17 @@ export const JUDGE0_STATUS = {
  * @returns {Promise<Object>} Judge0 submission response
  */
 export async function submitToJudge0(sourceCode, languageId, stdin = '', timeLimit = 5, memoryLimit = 128000) {
-  const JUDGE0_API_URL = process.env.JUDGE0_API_URL || 'http://localhost:2358';
+  const JUDGE0_API_URL = process.env.JUDGE0_API_URL || 'https://ce.judge0.com';
   const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY;
   const JUDGE0_AUTH_TOKEN = process.env.JUDGE0_AUTH_TOKEN;
+  const JUDGE0_RAPIDAPI_HOST = process.env.JUDGE0_RAPIDAPI_HOST || 'judge0-ce.p.rapidapi.com';
+
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(JUDGE0_API_KEY && { 'X-RapidAPI-Key': JUDGE0_API_KEY }),
+    ...(JUDGE0_API_KEY && { 'X-RapidAPI-Host': JUDGE0_RAPIDAPI_HOST }),
+    ...(JUDGE0_AUTH_TOKEN && { 'X-Auth-Token': JUDGE0_AUTH_TOKEN })
+  };
 
   try {
     const judge0LangId = mapToJudge0LanguageId(languageId);
@@ -63,11 +71,7 @@ export async function submitToJudge0(sourceCode, languageId, stdin = '', timeLim
         wait: false // Don't wait for result, get token immediately
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          ...(JUDGE0_API_KEY && { 'X-RapidAPI-Key': JUDGE0_API_KEY }),
-          ...(JUDGE0_AUTH_TOKEN && { 'X-Auth-Token': JUDGE0_AUTH_TOKEN })
-        },
+        headers,
         timeout: 10000
       }
     );
@@ -96,18 +100,22 @@ export async function submitToJudge0(sourceCode, languageId, stdin = '', timeLim
  * @returns {Promise<Object>} Submission result
  */
 export async function getJudge0Result(token) {
-  const JUDGE0_API_URL = process.env.JUDGE0_API_URL || 'http://localhost:2358';
+  const JUDGE0_API_URL = process.env.JUDGE0_API_URL || 'https://ce.judge0.com';
   const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY;
   const JUDGE0_AUTH_TOKEN = process.env.JUDGE0_AUTH_TOKEN;
+  const JUDGE0_RAPIDAPI_HOST = process.env.JUDGE0_RAPIDAPI_HOST || 'judge0-ce.p.rapidapi.com';
+
+  const headers = {
+    ...(JUDGE0_API_KEY && { 'X-RapidAPI-Key': JUDGE0_API_KEY }),
+    ...(JUDGE0_API_KEY && { 'X-RapidAPI-Host': JUDGE0_RAPIDAPI_HOST }),
+    ...(JUDGE0_AUTH_TOKEN && { 'X-Auth-Token': JUDGE0_AUTH_TOKEN })
+  };
 
   try {
     const response = await axios.get(
       `${JUDGE0_API_URL}/submissions/${token}`,
       {
-        headers: {
-          ...(JUDGE0_API_KEY && { 'X-RapidAPI-Key': JUDGE0_API_KEY }),
-          ...(JUDGE0_AUTH_TOKEN && { 'X-Auth-Token': JUDGE0_AUTH_TOKEN })
-        },
+        headers,
         timeout: 10000
       }
     );

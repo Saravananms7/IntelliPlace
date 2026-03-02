@@ -220,6 +220,7 @@ model CodingQuestion {
   expectedOutputs String     @map("expected_outputs") // JSON array of expected outputs
   sampleInput   String?      @map("sample_input")
   sampleOutput  String?      @map("sample_output")
+  sampleCases   Json?        @map("sample_cases") // [{input, output}, ...] - multiple sample cases
   constraints   String?      // Problem constraints
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
