@@ -60,13 +60,15 @@ export async function submitToJudge0(sourceCode, languageId, stdin = '', timeLim
 
   try {
     const judge0LangId = mapToJudge0LanguageId(languageId);
+    // Judge0 CE free tier caps cpu_time_limit at 20 seconds
+    const cappedTimeLimit = Math.min(Math.max(0.1, timeLimit), 20);
     const response = await axios.post(
       `${JUDGE0_API_URL}/submissions`,
       {
         source_code: sourceCode,
         language_id: judge0LangId,
         stdin: stdin,
-        cpu_time_limit: timeLimit,
+        cpu_time_limit: cappedTimeLimit,
         memory_limit: memoryLimit,
         wait: false // Don't wait for result, get token immediately
       },
@@ -172,6 +174,16 @@ export async function waitForJudge0Result(token, maxWaitTime = 30000, pollInterv
 }
 
 /**
+ * Normalize output for comparison: trim whitespace and unify line endings.
+ * Judge0 may return \r\n (Windows) while expected uses \n; strict equality would fail.
+ */
+function normalizeOutput(val) {
+  if (val == null) return '';
+  const s = String(val).trim();
+  return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+/**
  * Execute code with test cases and return results
  * @param {string} sourceCode - Source code
  * @param {number} languageId - Language ID
@@ -186,7 +198,7 @@ export async function executeWithTestCases(sourceCode, languageId, testCases, ex
 
   for (let i = 0; i < testCases.length; i++) {
     const testCase = testCases[i];
-    const expectedOutput = expectedOutputs[i]?.trim() || '';
+    const expectedOutput = normalizeOutput(expectedOutputs[i]);
 
     // Submit to Judge0
     const submission = await submitToJudge0(sourceCode, languageId, testCase, timeLimit);
@@ -224,7 +236,7 @@ export async function executeWithTestCases(sourceCode, languageId, testCases, ex
     const stdout = result.data.stdout || '';
     const stderr = result.data.stderr || '';
     const judge0Message = result.data.message || '';
-    const actualOutput = stdout.trim();
+    const actualOutput = normalizeOutput(stdout);
     const passed = actualOutput === expectedOutput && statusId === 3; // 3 = ACCEPTED
 
     let errorMsg = stderr || (statusId !== 3 ? result.data.status?.description : null);
