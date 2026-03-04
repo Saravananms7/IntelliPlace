@@ -864,6 +864,329 @@ router.post('/:jobId/close', authenticateToken, authorizeCompany, async (req, re
   }
 });
 
+// ========== APTITUDE TEST ENDPOINTS ==========
+
+// Create aptitude test
+router.post('/:jobId/aptitude-test', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+    const { sections, cutoff, totalQuestions, questions } = req.body;
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) {
+      return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+    }
+
+    // Delete existing test if any
+    await prisma.aptitudeTest.deleteMany({ where: { jobId } });
+
+    // Create new test with sections
+    const test = await prisma.aptitudeTest.create({
+      data: {
+        jobId,
+        sections: sections || [],
+        cutoff: cutoff ? parseInt(cutoff) : null,
+        totalQuestions: totalQuestions || 0,
+        status: 'CREATED'
+      }
+    });
+
+    // Add questions if provided
+    if (questions && Array.isArray(questions) && questions.length > 0) {
+      await prisma.aptitudeQuestion.createMany({
+        data: questions.map(q => ({
+          testId: test.id,
+          section: q.section,
+          questionText: q.question || q.questionText,
+          options: q.options || [],
+          correctIndex: q.correctIndex !== undefined ? q.correctIndex : 0,
+          marks: q.marks || 1
+        }))
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Aptitude test created successfully',
+      data: { test }
+    });
+  } catch (error) {
+    console.error('Error creating aptitude test:', error);
+    res.status(500).json({ success: false, message: 'Server error creating test' });
+  }
+});
+
+// Get aptitude test
+router.get('/:jobId/aptitude-test', async (req, res) => {
+  try {
+    const jobId = parseInt(req.params.jobId);
+    
+    const test = await prisma.aptitudeTest.findUnique({
+      where: { jobId },
+      include: { questions: true }
+    });
+
+    if (!test) {
+      return res.json({ success: true, data: { test: null } });
+    }
+
+    res.json({ success: true, data: { test } });
+  } catch (error) {
+    console.error('Error fetching aptitude test:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching test' });
+  }
+});
+
+// Get aptitude test questions
+router.get('/:jobId/aptitude-test/questions', authenticateToken, async (req, res) => {
+  try {
+    const jobId = parseInt(req.params.jobId);
+    
+    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
+    if (!test) {
+      return res.status(404).json({ success: false, message: 'Test not found' });
+    }
+
+    const questions = await prisma.aptitudeQuestion.findMany({
+      where: { testId: test.id }
+    });
+
+    res.json({ success: true, data: { questions } });
+  } catch (error) {
+    console.error('Error fetching questions:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching questions' });
+  }
+});
+
+// Get public questions (for students taking test - without correct answers)
+router.get('/:jobId/aptitude-test/questions/public', async (req, res) => {
+  try {
+    const jobId = parseInt(req.params.jobId);
+    
+    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
+    if (!test) {
+      return res.status(404).json({ success: false, message: 'Test not found' });
+    }
+
+    const questions = await prisma.aptitudeQuestion.findMany({
+      where: { testId: test.id },
+      select: {
+        id: true,
+        section: true,
+        questionText: true,
+        options: true,
+        marks: true
+      }
+    });
+
+    res.json({ success: true, data: { questions } });
+  } catch (error) {
+    console.error('Error fetching public questions:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching questions' });
+  }
+});
+
+// Add question to test
+router.post('/:jobId/aptitude-test/questions', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+    const { section, questionText, options, correctIndex, marks } = req.body;
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) {
+      return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+    }
+
+    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
+    if (!test) {
+      return res.status(404).json({ success: false, message: 'Test not found' });
+    }
+
+    const question = await prisma.aptitudeQuestion.create({
+      data: {
+        testId: test.id,
+        section,
+        questionText,
+        options: options || [],
+        correctIndex: correctIndex || 0,
+        marks: marks || 1
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Question added successfully',
+      data: { question }
+    });
+  } catch (error) {
+    console.error('Error adding question:', error);
+    res.status(500).json({ success: false, message: 'Server error adding question' });
+  }
+});
+
+// Delete question
+router.delete('/:jobId/aptitude-test/questions/:qId', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+    const qId = parseInt(req.params.qId);
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) {
+      return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+    }
+
+    await prisma.aptitudeQuestion.delete({
+      where: { id: qId }
+    });
+
+    res.json({ success: true, message: 'Question deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting question:', error);
+    res.status(500).json({ success: false, message: 'Server error deleting question' });
+  }
+});
+
+// Start test
+router.post('/:jobId/aptitude-test/start', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) {
+      return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+    }
+
+    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
+    if (!test) {
+      return res.status(404).json({ success: false, message: 'Test not found' });
+    }
+
+    const updated = await prisma.aptitudeTest.update({
+      where: { id: test.id },
+      data: { status: 'ACTIVE', startedAt: new Date() }
+    });
+
+    res.json({ success: true, message: 'Test started', data: { test: updated } });
+  } catch (error) {
+    console.error('Error starting test:', error);
+    res.status(500).json({ success: false, message: 'Server error starting test' });
+  }
+});
+
+// Stop test
+router.post('/:jobId/aptitude-test/stop', authenticateToken, authorizeCompany, async (req, res) => {
+  try {
+    const companyId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+
+    const job = await prisma.job.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== companyId) {
+      return res.status(404).json({ success: false, message: 'Job not found or access denied' });
+    }
+
+    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
+    if (!test) {
+      return res.status(404).json({ success: false, message: 'Test not found' });
+    }
+
+    const updated = await prisma.aptitudeTest.update({
+      where: { id: test.id },
+      data: { status: 'CLOSED' }
+    });
+
+    res.json({ success: true, message: 'Test stopped', data: { test: updated } });
+  } catch (error) {
+    console.error('Error stopping test:', error);
+    res.status(500).json({ success: false, message: 'Server error stopping test' });
+  }
+});
+
+// Submit test answers
+router.post('/:jobId/aptitude-test/submit', authenticateToken, authorizeStudent, async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+    const { answers } = req.body;
+
+    const test = await prisma.aptitudeTest.findUnique({
+      where: { jobId },
+      include: { questions: true }
+    });
+
+    if (!test) {
+      return res.status(404).json({ success: false, message: 'Test not found' });
+    }
+
+    // Calculate score
+    let score = 0;
+    let totalMarks = 0;
+
+    test.questions.forEach(q => {
+      totalMarks += q.marks;
+      if (answers[q.id] === q.correctIndex) {
+        score += q.marks;
+      }
+    });
+
+    const percentage = totalMarks > 0 ? (score / totalMarks) * 100 : 0;
+    const status = percentage >= (test.cutoff || 0) ? 'PASSED' : 'FAILED';
+
+    const submission = await prisma.aptitudeSubmission.create({
+      data: {
+        testId: test.id,
+        studentId,
+        answers,
+        score,
+        percentage,
+        status,
+        submittedAt: new Date()
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Test submitted successfully',
+      data: { submission, score, percentage, status }
+    });
+  } catch (error) {
+    console.error('Error submitting test:', error);
+    res.status(500).json({ success: false, message: 'Server error submitting test' });
+  }
+});
+
+// Get test status (for students)
+router.get('/:jobId/aptitude-test/status', authenticateToken, authorizeStudent, async (req, res) => {
+  try {
+    const studentId = req.user.id;
+    const jobId = parseInt(req.params.jobId);
+
+    const test = await prisma.aptitudeTest.findUnique({ where: { jobId } });
+    if (!test) {
+      return res.json({ success: true, data: { status: 'NOT_CREATED', submitted: false } });
+    }
+
+    const submission = await prisma.aptitudeSubmission.findFirst({
+      where: { testId: test.id, studentId }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        status: test.status,
+        submitted: !!submission,
+        submission: submission || null
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching test status:', error);
+    res.status(500).json({ success: false, message: 'Server error fetching test status' });
+  }
+});
+
 router.post('/:jobId/shortlist-ats', authenticateToken, authorizeCompany, async (req, res) => {
   try {
     const companyId = req.user.id;
