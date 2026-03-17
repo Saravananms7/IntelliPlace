@@ -65,17 +65,29 @@ const LandingPage = () => {
   return (
     <div className="min-h-screen bg-[#030305] text-white selection:bg-indigo-500/30 font-sans overflow-x-hidden">
 
-      {/* Background Orbs */}
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+      {/* Background Orbs & Image */}
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden bg-[#030305]">
+        {/* Dynamic Background Image */}
+        <div 
+          className="absolute inset-0 opacity-40 mix-blend-screen"
+          style={{ 
+            backgroundImage: "url('/landing_bg.png')", 
+            backgroundSize: 'cover', 
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat'
+          }} 
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#030305]/80 to-[#030305] z-0" />
+        
         <motion.div
           style={{ y: y1 }}
-          className="absolute top-[-20%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-indigo-600/10 blur-[120px]"
+          className="absolute top-[-20%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-indigo-600/20 blur-[140px]"
         />
         <motion.div
           style={{ y: y2 }}
-          className="absolute bottom-[-20%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-fuchsia-600/10 blur-[120px]"
+          className="absolute bottom-[-20%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-purple-600/20 blur-[140px]"
         />
-        <div className="absolute top-[40%] left-[50%] translate-x-[-50%] w-[60vw] h-[60vw] rounded-full bg-blue-600/5 blur-[150px]" />
+        <div className="absolute top-[40%] left-[50%] translate-x-[-50%] w-[60vw] h-[60vw] rounded-full bg-blue-600/10 blur-[150px]" />
       </div>
 
       {/* ================= NAVBAR ================= */}
@@ -138,15 +150,15 @@ const LandingPage = () => {
             initial="hidden"
             animate="visible"
             variants={staggerContainer}
-            className="text-6xl md:text-8xl lg:text-[7rem] font-extrabold tracking-tighter leading-[1.1] mb-8 text-center"
+            className="font-extrabold tracking-tighter leading-[1.05] mb-10 text-center flex flex-col gap-2 md:gap-4 relative z-10"
           >
-            <motion.span variants={fadeUpText} className="block text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400">
+            <motion.span variants={fadeUpText} className="block text-7xl md:text-9xl lg:text-[11rem] text-transparent bg-clip-text bg-gradient-to-b from-white via-blue-100 to-gray-400 drop-shadow-[0_0_20px_rgba(255,255,255,0.2)]">
               Intelliplace
             </motion.span>
-            <motion.span variants={fadeUpText} className="block text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-fuchsia-400">
+            <motion.span variants={fadeUpText} className="block text-5xl md:text-7xl lg:text-[5.5rem] text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-400">
               Hire the best talent.
             </motion.span>
-            <motion.span variants={fadeUpText} className="block text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-fuchsia-400 pb-2">
+            <motion.span variants={fadeUpText} className="block text-4xl md:text-6xl lg:text-[4.5rem] text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 via-pink-400 to-rose-400 pb-4">
               Faster and smarter.
             </motion.span>
           </motion.h1>
@@ -182,39 +194,8 @@ const LandingPage = () => {
           </motion.div>
         </motion.div>
 
-        {/* Dashboard Mockup Preview */}
-        <motion.div
-          initial={{ opacity: 0, y: 100 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1, delay: 0.8, ease: "easeOut" }}
-          className="mt-20 w-full max-w-6xl relative"
-        >
-          <div className="absolute inset-0 bg-gradient-to-t from-[#030305] via-transparent to-transparent z-10 bottom-0 top-[50%]" />
-          <div className="relative rounded-2xl md:rounded-[2rem] border border-white/10 bg-black/40 backdrop-blur-2xl overflow-hidden shadow-2xl shadow-indigo-500/10 p-2 md:p-4">
-            <div className="flex items-center gap-2 mb-4 px-2">
-              <div className="w-3 h-3 rounded-full bg-red-500/80" />
-              <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-              <div className="w-3 h-3 rounded-full bg-green-500/80" />
-            </div>
-            {/* Minimalist abstract representation of a dashboard instead of an image to keep it clean */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-[400px]">
-              <div className="col-span-1 border border-white/5 bg-white/[0.02] rounded-xl p-6 hidden md:flex flex-col gap-4">
-                <div className="h-4 w-1/3 bg-white/10 rounded" />
-                <div className="h-8 w-2/3 bg-white/20 rounded" />
-                <div className="mt-8 space-y-3">
-                  {[1, 2, 3, 4].map(i => <div key={i} className="h-10 w-full bg-white/5 rounded-lg" />)}
-                </div>
-              </div>
-              <div className="col-span-1 md:col-span-2 border border-white/5 bg-white/[0.02] rounded-xl p-6 flex flex-col gap-6">
-                <div className="flex justify-between items-center">
-                  <div className="h-6 w-1/4 bg-white/10 rounded" />
-                  <div className="h-8 w-24 bg-indigo-500/20 rounded-lg border border-indigo-500/30" />
-                </div>
-                <div className="flex-1 rounded-lg border border-white/5 bg-gradient-to-br from-white/[0.01] to-transparent" />
-              </div>
-            </div>
-          </div>
-        </motion.div>
+{/* Coding Platform Mockup */}
+        <MockupCarousel />
       </section>
 
       {/* ================= PROCESS/PIPELINE ================= */}
