@@ -179,9 +179,9 @@ const RecruitmentProcess = () => {
         if (applicationsRes.ok) {
           const applicationsData = await applicationsRes.json();
           const allApplications = applicationsData.data?.applications || [];
-          // Filter only shortlisted applications
+          // Filter applicants eligible for interview
           const shortlisted = allApplications.filter(
-            (app) => app.status === 'SHORTLISTED'
+            (app) => app.status === 'CODING_PASSED'
           );
           setShortlistedApplications(shortlisted);
         } else {

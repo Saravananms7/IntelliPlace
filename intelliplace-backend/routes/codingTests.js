@@ -164,7 +164,7 @@ router.get('/:jobId/coding-test/status', authenticateToken, async (req, res) => 
         where: {
           jobId: jobId,
           studentId: req.user.id,
-          status: 'SHORTLISTED'
+          status: 'APTITUDE_PASSED'
         }
       });
 
@@ -234,7 +234,7 @@ router.get('/:jobId/coding-test', authenticateToken, async (req, res) => {
         where: {
           jobId: jobId,
           studentId: req.user.id,
-          status: 'SHORTLISTED'
+          status: 'APTITUDE_PASSED'
         }
       });
 
@@ -343,7 +343,7 @@ router.post('/:jobId/coding-test/start', authenticateToken, authorizeCompany, as
     const shortlistedApplications = await prisma.application.findMany({
       where: {
         jobId: jobId,
-        status: 'SHORTLISTED'
+        status: 'APTITUDE_PASSED'
       },
       include: {
         student: true
@@ -490,6 +490,56 @@ router.post('/:jobId/coding-test/stop', authenticateToken, authorizeCompany, asy
       }
     });
 
+    // Evaluate all students who are APTITUDE_PASSED
+    const participants = await prisma.application.findMany({
+      where: { jobId, status: 'APTITUDE_PASSED' }
+    });
+
+    for (const applicant of participants) {
+      // Find all submissions for this student and test
+      const submissions = await prisma.codingSubmission.findMany({
+        where: { testId: codingTest.id, studentId: applicant.studentId },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      // Group by question and get highest score
+      let totalScore = 0;
+      const scoresByQ = {};
+      for (const sub of submissions) {
+        if (!scoresByQ[sub.questionId] || sub.score > scoresByQ[sub.questionId]) {
+          scoresByQ[sub.questionId] = sub.score;
+        }
+      }
+      for (const qScore of Object.values(scoresByQ)) {
+        totalScore += qScore || 0;
+      }
+
+      // Calculate total possible points
+      const maxPossible = updated.questions.reduce((sum, q) => sum + (q.points || 0), 0);
+      const percentage = maxPossible > 0 ? (totalScore / maxPossible) * 100 : 0;
+      
+      const newStatus = percentage >= (updated.cutoff || 0) ? 'CODING_PASSED' : 'CODING_FAILED';
+
+      await prisma.application.update({
+        where: { id: applicant.id },
+        data: { status: newStatus }
+      });
+
+      try {
+        await prisma.notification.create({
+          data: {
+            studentId: applicant.studentId,
+            title: `Coding Test ${newStatus === 'CODING_PASSED' ? 'Passed' : 'Failed'}`,
+            message: `Your coding test for job "${job.title}" was evaluated. You scored ${totalScore}/${maxPossible} (${percentage.toFixed(1)}%). Status: ${newStatus}.`,
+            applicationId: applicant.id,
+            jobId: jobId
+          }
+        });
+      } catch (err) {
+        console.error('Failed to create notification for coding test completion:', err);
+      }
+    }
+
     // Parse JSON fields for response
     const testData = {
       ...updated,
@@ -503,7 +553,7 @@ router.post('/:jobId/coding-test/stop', authenticateToken, authorizeCompany, asy
 
     res.json({
       success: true,
-      message: 'Coding test stopped successfully',
+      message: 'Coding test stopped and evaluated successfully',
       data: testData
     });
   } catch (error) {
@@ -645,7 +695,7 @@ router.post('/:jobId/coding-test/run-sample', authenticateToken, authorizeStuden
     }
 
     const application = await prisma.application.findFirst({
-      where: { jobId, studentId: req.user.id, status: 'SHORTLISTED' }
+      where: { jobId, studentId: req.user.id, status: 'APTITUDE_PASSED' }
     });
     if (!application) {
       return res.status(403).json({ success: false, message: 'You must be shortlisted to take this test' });

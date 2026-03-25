@@ -25,7 +25,7 @@ const StudentTakeTest = ({ isOpen, onClose, jobId, onSubmitted }) => {
       if (!document.fullscreenElement) {
         await containerRef.current?.requestFullscreen();
       }
-    } catch {}
+    } catch { }
   };
 
   /* ---------------- VIOLATION HANDLER ---------------- */
@@ -114,7 +114,7 @@ const StudentTakeTest = ({ isOpen, onClose, jobId, onSubmitted }) => {
         if (!json.success) {
           throw new Error(json.message || "Unable to load questions");
         }
-        
+
         const questions = json.data?.questions;
         if (!Array.isArray(questions)) {
           throw new Error("Invalid question format");
@@ -279,11 +279,10 @@ const StudentTakeTest = ({ isOpen, onClose, jobId, onSubmitted }) => {
                     {q.options.map((opt, i) => (
                       <label
                         key={i}
-                        className={`block p-3 border rounded mb-2 cursor-pointer ${
-                          answers[q.id] === i
+                        className={`block p-3 border rounded mb-2 cursor-pointer ${answers[q.id] === i
                             ? "border-blue-600 bg-blue-50"
                             : "hover:border-gray-400"
-                        }`}
+                          }`}
                       >
                         <input
                           type="radio"

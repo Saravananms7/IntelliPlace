@@ -19,6 +19,7 @@ const JobList = () => {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [applyState, setApplyState] = useState({ cgpa: '', backlog: '', cv: null });
   const [message, setMessage] = useState(null);
   const [appliedJobs, setAppliedJobs] = useState(new Set());
@@ -176,7 +177,8 @@ const JobList = () => {
 
   const submitApplication = async (e) => {
     e.preventDefault();
-    if (!selectedJob) return;
+    if (!selectedJob || isSubmitting) return;
+    setIsSubmitting(true);
     setMessage(null);
 
     // Check eligibility first
@@ -184,6 +186,7 @@ const JobList = () => {
     if (!eligibility.eligible) {
       setEligibilityError(eligibility.error);
       setMessage({ type: 'error', text: eligibility.error });
+      setIsSubmitting(false);
       return;
     }
     setEligibilityError(null);
@@ -191,6 +194,7 @@ const JobList = () => {
     // Validate file size (10MB limit)
     if (applyState.cv && applyState.cv.size > 10 * 1024 * 1024) {
       setMessage({ type: 'error', text: 'CV file size must be less than 10MB' });
+      setIsSubmitting(false);
       return;
     }
 
@@ -200,6 +204,7 @@ const JobList = () => {
       const ext = applyState.cv.name.toLowerCase().slice(applyState.cv.name.lastIndexOf('.'));
       if (!allowedTypes.includes(ext)) {
         setMessage({ type: 'error', text: 'Only PDF, DOC, and DOCX files are allowed' });
+        setIsSubmitting(false);
         return;
       }
     }
@@ -232,6 +237,8 @@ const JobList = () => {
       }
     } catch (err) {
       setMessage({ type: 'error', text: err.message || 'Network error. Please try again.' });
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -622,11 +629,13 @@ const JobList = () => {
                   <button
                     type="submit"
                     disabled={
+                      isSubmitting ||
                       eligibilityError !== null || 
                       (selectedJob?.includeCgpaInShortlisting !== false && !applyState.cgpa) || 
                       applyState.backlog === ''
                     }
                     className={`px-4 py-2 text-sm font-medium rounded-lg ${
+                      isSubmitting ||
                       eligibilityError !== null || 
                       (selectedJob?.includeCgpaInShortlisting !== false && !applyState.cgpa) || 
                       applyState.backlog === ''
@@ -640,7 +649,7 @@ const JobList = () => {
                         : '')
                     }
                   >
-                    Submit Application
+                    {isSubmitting ? 'Submitting...' : 'Submit Application'}
                   </button>
                 </div>
               </form>

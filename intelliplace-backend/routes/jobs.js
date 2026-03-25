@@ -217,8 +217,15 @@ router.get('/', async (req, res) => {
   }
 });
 
+const applicationLocks = new Map();
 
 router.post('/:jobId/apply', authenticateToken, authorizeStudent, upload.single('cv'), async (req, res) => {
+  const lockKey = `${req.user.id}-${req.params.jobId}`;
+  if (applicationLocks.has(lockKey)) {
+    return res.status(400).json({ success: false, message: 'Your application is already being processed' });
+  }
+  applicationLocks.set(lockKey, true);
+
   try {
     const studentId = req.user.id;
     const jobId = parseInt(req.params.jobId);
@@ -356,6 +363,8 @@ router.post('/:jobId/apply', authenticateToken, authorizeStudent, upload.single(
   } catch (error) {
     console.error('Error applying to job:', error);
     res.status(500).json({ success: false, message: 'Server error applying to job' });
+  } finally {
+    applicationLocks.delete(lockKey);
   }
 });
 
@@ -1255,6 +1264,33 @@ router.post('/:jobId/aptitude-test/submit', authenticateToken, authorizeStudent,
         submittedAt: new Date()
       }
     });
+
+    // Update application status and notify
+    const application = await prisma.application.findFirst({
+      where: { jobId, studentId }
+    });
+
+    if (application) {
+      const newAppStatus = status === 'PASSED' ? 'APTITUDE_PASSED' : 'APTITUDE_FAILED';
+      await prisma.application.update({
+        where: { id: application.id },
+        data: { status: newAppStatus }
+      });
+
+      try {
+        await prisma.notification.create({
+          data: {
+            studentId,
+            title: `Aptitude Test ${status === 'PASSED' ? 'Passed' : 'Failed'}`,
+            message: `Your aptitude test for job "${jobId}" was evaluated. You scored ${score}/${totalMarks} (${percentage.toFixed(1)}%). Status: ${newAppStatus}.`,
+            applicationId: application.id,
+            jobId: jobId
+          }
+        });
+      } catch (err) {
+        console.error('Failed to create notification for aptitude test result:', err);
+      }
+    }
 
     res.json({
       success: true,
