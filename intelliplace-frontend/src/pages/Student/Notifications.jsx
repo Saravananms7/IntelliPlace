@@ -74,23 +74,25 @@ const Notifications = () => {
 
       const payload = json.data || {};
       
-      // Check if this is a coding test notification
-      const isCodingTestNotification = notif.title && notif.title.toLowerCase().includes('coding test');
-      // Check if this is an interview notification
-      const isInterviewNotification = notif.title && notif.title.toLowerCase().includes('interview');
+      const titleLower = (notif.title || '').toLowerCase();
+      const messageLower = (notif.message || '').toLowerCase();
+      const isCodingTestNotification =
+        titleLower.includes('coding test') || messageLower.includes('coding test');
+      const isInterviewNotification =
+        titleLower.includes('interview') || messageLower.includes('interview');
       
       if (payload.application) {
-        // If it's a coding test notification, navigate with a flag to open the test
         if (isCodingTestNotification && payload.application.jobId) {
-          // Store the jobId in sessionStorage so the applications page can detect it
           sessionStorage.setItem('openCodingTest', payload.application.jobId.toString());
         }
-        // If it's an interview notification, navigate with a flag to open the interview
-        if (isInterviewNotification && payload.application.jobId && payload.application.id) {
-          sessionStorage.setItem('openInterview', JSON.stringify({
-            jobId: payload.application.jobId,
-            applicationId: payload.application.id
-          }));
+        if (isInterviewNotification && payload.application.jobId != null && payload.application.id != null) {
+          sessionStorage.setItem(
+            'openInterview',
+            JSON.stringify({
+              jobId: payload.application.jobId,
+              applicationId: payload.application.id,
+            })
+          );
         }
         navigate('/student/applications');
         return;
@@ -120,11 +122,13 @@ const Notifications = () => {
       // fallback behavior
       try { setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n)); } catch(e){}
       
-      // Check if it's a coding test notification
-      const isCodingTestNotification = notif.title && notif.title.toLowerCase().includes('coding test');
-      // Check if it's an interview notification
-      const isInterviewNotification = notif.title && notif.title.toLowerCase().includes('interview');
-      
+      const titleLower = (notif.title || '').toLowerCase();
+      const messageLower = (notif.message || '').toLowerCase();
+      const isCodingTestNotification =
+        titleLower.includes('coding test') || messageLower.includes('coding test');
+      const isInterviewNotification =
+        titleLower.includes('interview') || messageLower.includes('interview');
+
       if (isCodingTestNotification && notif.jobId) {
         sessionStorage.setItem('openCodingTest', notif.jobId.toString());
         navigate('/student/applications');

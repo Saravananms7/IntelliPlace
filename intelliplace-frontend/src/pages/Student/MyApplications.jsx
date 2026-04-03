@@ -10,6 +10,21 @@ import { useNavigate } from 'react-router-dom';
 import { getCurrentUser } from '../../utils/auth';
 import { Play, Code, RefreshCw, Video } from 'lucide-react';
 
+/** Statuses where aptitude/coding/interview actions apply. Must include CODING_PASSED (set by backend after coding test). */
+const ELIGIBLE_STATUSES = [
+  'SHORTLISTED',
+  'APP PASS',
+  'PASSED APTITUDE',
+  'APTITUDE_PASSED',
+  'CODE PASS',
+  'PASSED CODING',
+  'CODE_PASSED',
+  'CODING_PASSED',
+];
+
+/** After coding test — company may start an interview; show Join even if prefetch failed. */
+const CAN_JOIN_INTERVIEW_STATUS = ['CODING_PASSED'];
+
 const getStatusBadgeClasses = (status) => {
   const s = status ? status.toUpperCase() : 'UNKNOWN';
   switch (s) {
@@ -46,7 +61,6 @@ const MyApplications = () => {
   const [preview, setPreview] = useState(null);
   const [modal, setModal] = useState(null);
   const [notice, setNotice] = useState(null);
-  const [error, setError] = useState(null);
   const [isTestOpen, setIsTestOpen] = useState(false);
   const [isCodingTestOpen, setIsCodingTestOpen] = useState(false);
   const [isInterviewOpen, setIsInterviewOpen] = useState(false);
@@ -54,7 +68,8 @@ const MyApplications = () => {
   const [interviewData, setInterviewData] = useState(null); // { jobId, applicationId, question, questionIndex }
   const [testStatuses, setTestStatuses] = useState({}); // jobId -> test status
   const [codingTestStatuses, setCodingTestStatuses] = useState({}); // jobId -> coding test status
-  const [interviewSessions, setInterviewSessions] = useState({}); // jobId -> interview session data
+  /** applicationId -> student-session API payload (interview started by company) */
+  const [interviewSessionsByAppId, setInterviewSessionsByAppId] = useState({});
 
   // Fetch applications and test statuses
   const fetchApplications = async () => {
@@ -67,8 +82,6 @@ const MyApplications = () => {
         if (res.ok) {
           const apps = json.data.applications || [];
           setApplications(apps);
-          
-          const ELIGIBLE_STATUSES = ['SHORTLISTED', 'APP PASS', 'PASSED APTITUDE', 'APTITUDE_PASSED', 'CODE PASS', 'PASSED CODING', 'CODE_PASSED'];
           
           // Fetch test status for each job that has eligible applications
           const shortlistedJobs = apps
@@ -117,9 +130,9 @@ const MyApplications = () => {
           console.log('Test statuses:', testStatusMap);
           console.log('Coding test statuses:', codingTestStatusMap);
           
-          // Fetch interview sessions for eligible applications
-          const interviewSessionMap = {};
-          for (const app of apps.filter(a => ELIGIBLE_STATUSES.includes(a.status?.toUpperCase()))) {
+          // Prefetch interview sessions (per application) so we know when one is active
+          const interviewByApp = {};
+          for (const app of apps.filter((a) => ELIGIBLE_STATUSES.includes(a.status?.toUpperCase()))) {
             try {
               const interviewRes = await fetch(
                 `${API_BASE_URL}/jobs/${app.jobId}/interviews/${app.id}/student-session`,
@@ -128,14 +141,14 @@ const MyApplications = () => {
               if (interviewRes.ok) {
                 const interviewJson = await interviewRes.json();
                 if (interviewJson.data?.session) {
-                  interviewSessionMap[app.jobId] = interviewJson.data;
+                  interviewByApp[app.id] = interviewJson.data;
                 }
               }
             } catch (err) {
-              // Interview might not exist, which is fine
+              // Interview might not exist yet
             }
           }
-          setInterviewSessions(interviewSessionMap);
+          setInterviewSessionsByAppId(interviewByApp);
         }
       } catch (err) {
         console.error(err);
@@ -161,15 +174,23 @@ const MyApplications = () => {
             session: data.data.session,
           });
           setIsInterviewOpen(true);
+          setNotice(null);
         } else {
-          setError('No active interview session found');
+          setNotice({
+            type: 'error',
+            text: 'No active interview session yet. The company will start the interview first — try again after you are notified.',
+          });
         }
       } else {
-        setError('Failed to load interview session');
+        const errJson = await res.json().catch(() => ({}));
+        setNotice({
+          type: 'error',
+          text: errJson.message || 'No interview session available. Ask the company to start the interview or try again later.',
+        });
       }
     } catch (err) {
       console.error('Error fetching interview session:', err);
-      setError('Failed to load interview session');
+      setNotice({ type: 'error', text: 'Could not load the interview. Check your connection and try again.' });
     }
   };
 
@@ -197,11 +218,12 @@ const MyApplications = () => {
       // Clear the flag immediately
       sessionStorage.removeItem('openCodingTest');
       
-      const jobId = parseInt(openCodingTestJobId);
+      const jobId = parseInt(openCodingTestJobId, 10);
       
       // Check if student has an eligible application for this job
-      const ELIGIBLE_STATUSES = ['SHORTLISTED', 'APP PASS', 'PASSED APTITUDE', 'APTITUDE_PASSED', 'CODE PASS', 'PASSED CODING', 'CODE_PASSED'];
-      const app = applications.find(a => a.jobId === jobId && ELIGIBLE_STATUSES.includes(a.status?.toUpperCase()));
+      const app = applications.find(
+        (a) => Number(a.jobId) === jobId && ELIGIBLE_STATUSES.includes(a.status?.toUpperCase())
+      );
       
       if (app) {
         // Check if coding test is available
@@ -230,52 +252,56 @@ const MyApplications = () => {
     }
   }, [applications]); // Run when applications are loaded or updated
   
-  // Check if we need to open an interview from notification
+  // Check if we need to open an interview from notification (deep link)
   useEffect(() => {
     const openInterviewData = sessionStorage.getItem('openInterview');
-    if (openInterviewData && applications.length > 0) {
+    if (!openInterviewData || applications.length === 0) return;
+
+    let jobId;
+    let applicationId;
+    try {
+      const parsed = JSON.parse(openInterviewData);
+      jobId = parsed.jobId;
+      applicationId = parsed.applicationId;
+    } catch {
+      sessionStorage.removeItem('openInterview');
+      return;
+    }
+
+    // Match by IDs only — notification implies this application is theirs; status may be CODING_PASSED etc.
+    const app = applications.find(
+      (a) => Number(a.jobId) === Number(jobId) && Number(a.id) === Number(applicationId)
+    );
+    if (!app) return;
+
+    sessionStorage.removeItem('openInterview');
+
+    const checkAndOpen = async () => {
       try {
-        const { jobId, applicationId } = JSON.parse(openInterviewData);
-        sessionStorage.removeItem('openInterview');
-        
-        // Check if student has an eligible application for this job
-        const ELIGIBLE_STATUSES = ['SHORTLISTED', 'APP PASS', 'PASSED APTITUDE', 'APTITUDE_PASSED', 'CODE PASS', 'PASSED CODING', 'CODE_PASSED'];
-        const app = applications.find(a => a.jobId === jobId && a.id === applicationId && ELIGIBLE_STATUSES.includes(a.status?.toUpperCase()));
-        
-        if (app) {
-          // Fetch interview session and open
-          const checkAndOpen = async () => {
-            try {
-              const interviewRes = await fetch(
-                `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/student-session`,
-                { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
-              );
-              
-              if (interviewRes.ok) {
-                const interviewJson = await interviewRes.json();
-                if (interviewJson.data?.session) {
-                  // Open interview interface (will show start screen)
-                  setInterviewData({
-                    jobId,
-                    applicationId,
-                    question: null, // No question yet - will show start screen
-                    questionIndex: -1,
-                    session: interviewJson.data.session,
-                  });
-                  setIsInterviewOpen(true);
-                }
-              }
-            } catch (err) {
-              console.error('Failed to check interview availability:', err);
-            }
-          };
-          
-          setTimeout(checkAndOpen, 500);
+        const interviewRes = await fetch(
+          `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/student-session`,
+          { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+        );
+
+        if (interviewRes.ok) {
+          const interviewJson = await interviewRes.json();
+          if (interviewJson.data?.session) {
+            setInterviewData({
+              jobId,
+              applicationId,
+              question: null,
+              questionIndex: -1,
+              session: interviewJson.data.session,
+            });
+            setIsInterviewOpen(true);
+          }
         }
       } catch (err) {
-        console.error('Failed to parse interview data:', err);
+        console.error('Failed to open interview from notification:', err);
       }
-    }
+    };
+
+    setTimeout(checkAndOpen, 300);
   }, [applications]);
   
   // Manual refresh function (reuses the same logic)
@@ -420,13 +446,21 @@ const MyApplications = () => {
                     </>
                   )}
                   
-                  {['SHORTLISTED', 'APP PASS', 'PASSED APTITUDE', 'APTITUDE_PASSED', 'CODE PASS', 'PASSED CODING'].includes(app.status?.toUpperCase()) && interviewSessions[app.jobId] && (
+                  {ELIGIBLE_STATUSES.includes(app.status?.toUpperCase()) &&
+                    (interviewSessionsByAppId[app.id] ||
+                      CAN_JOIN_INTERVIEW_STATUS.includes(app.status?.toUpperCase())) && (
                     <button
+                      type="button"
                       onClick={() => handleStartInterview(app.jobId, app.id)}
                       className="flex items-center gap-2 px-3 py-1 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700"
+                      title={
+                        interviewSessionsByAppId[app.id]
+                          ? 'Open your video interview'
+                          : 'Open when the company has started your interview'
+                      }
                     >
                       <Video className="w-4 h-4" />
-                      Start Interview
+                      Join interview
                     </button>
                   )}
                 </div>

@@ -1,6 +1,17 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Code, Users, Play, Square, CheckCircle, Loader, MessageSquare } from 'lucide-react';
+import {
+  X,
+  Code,
+  Users,
+  Play,
+  Square,
+  CheckCircle,
+  Loader,
+  Settings,
+  Sparkles,
+} from 'lucide-react';
+import { API_BASE_URL } from '../config.js';
 
 const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, application, job, onRefresh }) => {
   const [mode, setMode] = useState(null);
@@ -11,6 +22,7 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
   const [generatingQuestion, setGeneratingQuestion] = useState(false);
   const [message, setMessage] = useState(null);
   const [interviewStatus, setInterviewStatus] = useState('STOPPED');
+  const [showControls, setShowControls] = useState(true);
 
   useEffect(() => {
     if (isOpen && applicationId) {
@@ -24,7 +36,7 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/session`,
+        `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/session`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -78,7 +90,7 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/start`,
+        `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/start`,
         {
           method: 'POST',
           headers: {
@@ -117,7 +129,7 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/stop`,
+        `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/stop`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
@@ -145,7 +157,7 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/generate-question`,
+        `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/generate-question`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
@@ -178,7 +190,7 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(
-        `http://localhost:5000/api/jobs/${jobId}/interviews/${applicationId}/complete`,
+        `${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/complete`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
@@ -250,7 +262,7 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
                   Select Interview Mode
                 </h4>
                 <p className="text-gray-600">
-                  Choose the type of interview you want to conduct
+                  Technical interviews start with getting to know the candidate, then move gradually toward role-specific depth; questions usually follow up on what they already said, like a real conversation.
                 </p>
               </div>
 
@@ -327,6 +339,48 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
                 </div>
               </div>
 
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 flex gap-3 items-start">
+                <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-900">
+                  <p className="font-medium">Automatic flow</p>
+                  <p className="text-blue-800/90 mt-1">
+                    The next question is generated automatically after each candidate answer (while the session is active).
+                    Use &quot;Generate another question&quot; only if you want an extra prompt on top of the automatic one.
+                  </p>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowControls((s) => !s)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left"
+                >
+                  <span className="flex items-center gap-2 font-medium text-gray-800">
+                    <Settings className="w-4 h-4" />
+                    Interview controls &amp; info
+                  </span>
+                  <span className="text-xs text-gray-500">{showControls ? 'Hide' : 'Show'}</span>
+                </button>
+                {showControls && (
+                  <div className="px-4 py-3 text-sm text-gray-600 space-y-2 border-t border-gray-100 bg-white">
+                    <p>
+                      <strong className="text-gray-800">Transcript:</strong> Scroll below for every question and full candidate answer.
+                      This view refreshes every few seconds while the modal is open.
+                    </p>
+                    <p>
+                      <strong className="text-gray-800">Stopping:</strong> Stop ends the session so the candidate cannot submit more answers.
+                      Complete marks the interview finished when you are done reviewing.
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Server options: auto next question after each answer (default on), max questions cap — configure via backend env{' '}
+                      <code className="bg-gray-100 px-1 rounded">INTERVIEW_AUTO_NEXT</code>,{' '}
+                      <code className="bg-gray-100 px-1 rounded">INTERVIEW_MAX_QUESTIONS</code>.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {currentQuestion && (
                 <div className="border-2 border-indigo-200 rounded-lg p-6 bg-indigo-50">
                   <div className="flex items-start justify-between mb-4">
@@ -391,7 +445,8 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
 
               {questions.length > 0 && (
                 <div>
-                  <h5 className="font-semibold text-gray-800 mb-3">All Questions & Answers</h5>
+                  <h5 className="font-semibold text-gray-800 mb-1">Full transcript — questions &amp; answers</h5>
+                  <p className="text-xs text-gray-500 mb-3">Click a row to focus it above. Long answers are scrollable.</p>
                   <div className="space-y-3">
                     {questions.map((q, idx) => {
                       const qIndex = q.index !== undefined ? q.index : idx;
@@ -419,7 +474,9 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
                               {q.answer && (
                                 <div className="mt-2 pt-2 border-t">
                                   <p className="text-xs font-medium text-gray-600 mb-1">Answer:</p>
-                                  <p className="text-sm text-gray-800 line-clamp-2">{q.answer}</p>
+                                  <p className="text-sm text-gray-800 whitespace-pre-wrap max-h-48 overflow-y-auto rounded bg-gray-50 p-2">
+                                    {q.answer}
+                                  </p>
                                   {q.analysis?.overall_score !== undefined && (
                                     <p className="text-xs text-blue-600 mt-1">
                                       Score: {q.analysis.overall_score.toFixed(1)}/10
@@ -436,11 +493,12 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
                 </div>
               )}
 
-              <div className="flex gap-3 pt-4 border-t">
+              <div className="flex flex-wrap gap-3 pt-4 border-t">
                 <button
+                  type="button"
                   onClick={handleGenerateQuestion}
                   disabled={generatingQuestion || interviewStatus !== 'ACTIVE'}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-white border-2 border-blue-600 text-blue-700 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {generatingQuestion ? (
                     <>
@@ -450,7 +508,7 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
                   ) : (
                     <>
                       <Play className="w-4 h-4" />
-                      Generate Next Question
+                      Generate another question
                     </>
                   )}
                 </button>

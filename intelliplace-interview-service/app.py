@@ -36,34 +36,78 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 
-def generate_tech_question(job_title, job_description, required_skills, candidate_skills=None, previous_questions=None):
+def _resume_snippet(resume_excerpt, max_chars=10000):
+    if not resume_excerpt or not str(resume_excerpt).strip():
+        return ""
+    s = str(resume_excerpt).strip()
+    return s[:max_chars]
 
-    
+
+def generate_tech_question(
+    job_title,
+    job_description,
+    required_skills,
+    candidate_skills=None,
+    previous_questions=None,
+    resume_excerpt=None,
+    conversation_history=None,
+    next_question_index=0,
+):
     context = f"""
     Job Title: {job_title}
     Job Description: {job_description}
     Required Skills: {', '.join(required_skills) if required_skills else 'Not specified'}
     """
-    
+
     if candidate_skills:
-        context += f"\nCandidate Skills: {', '.join(candidate_skills)}"
-    
+        if isinstance(candidate_skills, list):
+            context += f"\nCandidate stated skills (from application): {', '.join(str(s) for s in candidate_skills)}"
+        else:
+            context += f"\nCandidate stated skills (from application): {candidate_skills}"
+
+    snippet = _resume_snippet(resume_excerpt)
+    if snippet:
+        context += f"""
+---
+Candidate resume / CV (plain text — use employers, projects, stack, education listed here):
+{snippet}
+---
+"""
+
     if previous_questions:
         context += f"\nPrevious Questions Asked: {', '.join(previous_questions)}"
-    
+
+    if conversation_history:
+        turns = []
+        for i, turn in enumerate(conversation_history):
+            if isinstance(turn, dict):
+                q = turn.get("question", "")
+                a = turn.get("answer", "")
+                turns.append(f"Q: {q}\nA: {a}")
+        if turns:
+            context += "\n\nConversation so far:\n" + "\n\n".join(turns)
+
+    arc_hint = (
+        "Opening: ask about a concrete project, job, or skill from their resume."
+        if next_question_index == 0
+        else "Build on the resume or prior answers; ask about different experience, projects, or depth on a skill."
+    )
+
     prompt = f"""
-    You are a technical interviewer conducting an interview for the following position:
-    
+    You are a technical interviewer for this role. Ask questions grounded in **real experience** — work history, projects, tools, and skills — not only abstract theory.
+
     {context}
-    
+
+    Question index in this session (0 = first): {next_question_index}. {arc_hint}
+
     Generate ONE technical interview question that:
-    1. Is relevant to the job role and required skills
-    2. Tests practical knowledge and problem-solving ability
-    3. Is appropriate for a {job_title} position
-    4. Is different from any previous questions (if provided)
-    5. Can be answered in 2-3 minutes
-    
-    Return ONLY the question text, nothing else. Make it clear and concise.
+    1. References something specific from the **resume excerpt or stated skills** when available (company, project name, technology, or role). If no resume text, tie to stated skills with a request for a concrete example.
+    2. Is relevant to the job and required skills; appropriate for a {job_title} conversation (not a trivia quiz unless the arc calls for depth).
+    3. Is different from previous questions listed above.
+    4. Can be answered in 2–4 minutes in conversation.
+    5. Sounds natural and spoken, max ~130 words.
+
+    Return ONLY the question text, nothing else.
     """
     
     try:
@@ -74,38 +118,57 @@ def generate_tech_question(job_title, job_description, required_skills, candidat
         raise Exception(f"Error generating question: {str(e)}")
 
 
-def generate_hr_question(job_title, job_description, candidate_profile=None, previous_questions=None):
-    
-    
+def generate_hr_question(
+    job_title,
+    job_description,
+    candidate_profile=None,
+    previous_questions=None,
+    resume_excerpt=None,
+    conversation_history=None,
+):
     context = f"""
     Job Title: {job_title}
     Job Description: {job_description}
     """
-    
+
     if candidate_profile:
         context += f"\nCandidate Profile: {candidate_profile}"
-    
+
+    snippet = _resume_snippet(resume_excerpt)
+    if snippet:
+        context += f"""
+---
+Candidate resume / CV (plain text — anchor behavioral questions in roles, education, volunteering, or projects they list):
+{snippet}
+---
+"""
+
     if previous_questions:
         context += f"\nPrevious Questions Asked: {', '.join(previous_questions)}"
-    
+
+    if conversation_history:
+        turns = []
+        for turn in conversation_history:
+            if isinstance(turn, dict):
+                q = turn.get("question", "")
+                a = turn.get("answer", "")
+                turns.append(f"Q: {q}\nA: {a}")
+        if turns:
+            context += "\n\nConversation so far:\n" + "\n\n".join(turns)
+
     prompt = f"""
-    You are an HR interviewer conducting a behavioral interview for the following position:
-    
+    You are an HR interviewer. Ask behavioral questions that **tie to their background** when the resume or profile gives hooks (past job, degree, club, project).
+
     {context}
-    
-    Generate ONE HR/behavioral interview question that:
-    1. Assesses soft skills, communication, and cultural fit
-    2. Uses the STAR method (Situation, Task, Action, Result) format
-    3. Is relevant to the job role
-    4. Is different from any previous questions (if provided)
-    5. Can be answered in 3-5 minutes
-    
-    Examples of good HR questions:
-    - "Tell me about a time when you had to work under pressure."
-    - "Describe a situation where you had to work in a team to achieve a goal."
-    - "How do you handle conflicts in the workplace?"
-    
-    Return ONLY the question text, nothing else. Make it clear and concise.
+
+    Generate ONE HR/behavioral question that:
+    1. Prefer referencing something concrete they could have lived (from resume: employer, project, team, or study) — then ask about behavior, values, or collaboration in that context.
+    2. Assesses soft skills and fit; STAR-friendly but ask one clear question.
+    3. Is different from previous questions (if provided).
+    4. Can be answered in 3–5 minutes.
+    5. Max ~130 words; spoken tone.
+
+    Return ONLY the question text, nothing else.
     """
     
     try:
@@ -155,21 +218,29 @@ def generate_question():
         candidate_skills = data.get('candidate_skills')
         candidate_profile = data.get('candidate_profile')
         previous_questions = data.get('previous_questions', [])
-        
+        resume_excerpt = data.get('resume_excerpt') or ''
+        conversation_history = data.get('conversation_history') or []
+        next_question_index = int(data.get('next_question_index') or 0)
+
         if mode == 'TECH':
             question = generate_tech_question(
                 job_title=job_title,
                 job_description=job_description,
                 required_skills=required_skills,
                 candidate_skills=candidate_skills,
-                previous_questions=previous_questions
+                previous_questions=previous_questions,
+                resume_excerpt=resume_excerpt,
+                conversation_history=conversation_history,
+                next_question_index=next_question_index,
             )
         else:  # HR mode
             question = generate_hr_question(
                 job_title=job_title,
                 job_description=job_description,
                 candidate_profile=candidate_profile,
-                previous_questions=previous_questions
+                previous_questions=previous_questions,
+                resume_excerpt=resume_excerpt,
+                conversation_history=conversation_history,
             )
         
         return jsonify({

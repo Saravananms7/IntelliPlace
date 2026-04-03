@@ -2,9 +2,251 @@ import express from 'express';
 import prisma from '../lib/prisma.js';
 import { authenticateToken, authorizeCompany, authorizeStudent } from '../middleware/auth.js';
 import axios from 'axios';
+import { generateInterviewQuestion as generateInterviewQuestionGemini } from '../lib/gemini.js';
 
 const router = express.Router();
 const INTERVIEW_SERVICE_URL = process.env.INTERVIEW_SERVICE_URL || 'http://localhost:8001';
+
+/** Build ordered Q&A pairs for adaptive prompts (matches answers to question text by index). */
+function buildConversationHistory(questions, answers) {
+  const list = Array.isArray(questions) ? questions : JSON.parse(questions || '[]');
+  const ans = Array.isArray(answers) ? answers : JSON.parse(answers || '[]');
+  const sorted = [...ans].sort(
+    (a, b) => (a.questionIndex ?? 0) - (b.questionIndex ?? 0)
+  );
+  return sorted
+    .map((a) => {
+      const idx = a.questionIndex;
+      const qObj = list.find((q, i) => (q.index !== undefined ? q.index : i) === idx);
+      const qText = qObj?.question || '';
+      const aText =
+        typeof a.answer === 'string' ? a.answer : a.answer != null ? String(a.answer) : '';
+      return { question: qText, answer: aText };
+    })
+    .filter((t) => t.question && t.answer);
+}
+
+/** Same merge as GET student-session — client can advance without an extra round-trip. */
+function mergeSessionQuestionsWithAnswers(sessionRow) {
+  if (!sessionRow) return null;
+  const questions = JSON.parse(sessionRow.questions || '[]');
+  const answers = JSON.parse(sessionRow.answers || '[]');
+  const questionsWithAnswers = questions.map((q, idx) => {
+    const qIndex = q.index !== undefined ? q.index : idx;
+    const answer = answers.find((a) => a.questionIndex === qIndex);
+    return {
+      ...q,
+      index: qIndex,
+      answer: answer ? answer.answer : null,
+      analysis: answer?.analysis || null,
+    };
+  });
+  return {
+    ...sessionRow,
+    questions: questionsWithAnswers,
+  };
+}
+
+/** Max AI questions: TECH uses INTERVIEW_TECH_MAX_QUESTIONS (default 12), others use INTERVIEW_MAX_QUESTIONS (default 25). */
+function getMaxQuestionsForSession(sessionRow) {
+  const globalMax = parseInt(process.env.INTERVIEW_MAX_QUESTIONS || '25', 10);
+  if (!sessionRow || String(sessionRow.mode).toUpperCase() !== 'TECH') {
+    return globalMax;
+  }
+  const techMax = parseInt(process.env.INTERVIEW_TECH_MAX_QUESTIONS || '12', 10);
+  return Math.min(Math.max(techMax, 1), globalMax);
+}
+
+function everyQuestionHasAnswer(questionsArr, answersArr) {
+  if (!Array.isArray(questionsArr) || questionsArr.length === 0) return false;
+  const answers = Array.isArray(answersArr) ? answersArr : [];
+  return questionsArr.every((q, idx) => {
+    const qi = q.index !== undefined ? q.index : idx;
+    const ans = answers.find((a) => a.questionIndex === qi);
+    return ans && ans.answer != null && String(ans.answer).trim() !== '';
+  });
+}
+
+/** Best-effort plain text from stored CV bytes (skips likely PDF binaries). */
+function extractResumeExcerpt(application, student) {
+  const tryBuf = (buf) => {
+    if (!buf) return '';
+    const b = Buffer.from(buf);
+    const s = b.toString('utf8');
+    const nonPrint = (s.match(/[^\x20-\x7E\n\r\t]/g) || []).length;
+    if (nonPrint / Math.max(s.length, 1) > 0.35) return '';
+    return s.trim().slice(0, 14000);
+  };
+  const fromApp = tryBuf(application?.cvData);
+  if (fromApp) return fromApp;
+  return tryBuf(student?.cvData) || '';
+}
+
+/**
+ * Core logic for AI-generated next question (used by company route and auto-advance after student answer).
+ * @returns {Promise<{ ok: true, newQuestion: object, sessionId: number } | { ok: false, message: string }>}
+ */
+async function runInterviewQuestionGeneration(prisma, jobId, applicationId, options = {}) {
+  const { requireActiveSession = false } = options;
+
+  try {
+    const job = await prisma.job.findFirst({
+      where: { id: jobId },
+      include: {
+        applications: {
+          where: { id: applicationId },
+          include: { student: true },
+        },
+      },
+    });
+
+    if (!job?.applications?.[0]) {
+      return { ok: false, message: 'Application not found' };
+    }
+
+    const application = job.applications[0];
+    const student = application.student;
+
+    const sessionWhere = requireActiveSession
+      ? { status: 'ACTIVE' }
+      : { status: { in: ['ACTIVE', 'STOPPED'] } };
+
+    const interview = await prisma.interview.findUnique({
+      where: { applicationId },
+      include: {
+        sessions: {
+          where: sessionWhere,
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!interview?.sessions?.length) {
+      return { ok: false, message: 'No active interview session found' };
+    }
+
+    const session = interview.sessions[0];
+    const questions = JSON.parse(session.questions || '[]');
+    const maxQuestions = getMaxQuestionsForSession(session);
+
+    if (questions.length >= maxQuestions) {
+      return { ok: false, message: 'Maximum interview questions reached' };
+    }
+
+    const answersArr = JSON.parse(session.answers || '[]');
+    const previousQuestions = questions.map((q) => q.question);
+    const conversationHistory = buildConversationHistory(questions, answersArr);
+    const nextQuestionIndex = questions.length;
+
+    let requiredSkills = [];
+    if (job.requiredSkills) {
+      try {
+        requiredSkills =
+          typeof job.requiredSkills === 'string' ? JSON.parse(job.requiredSkills) : job.requiredSkills;
+        if (!Array.isArray(requiredSkills)) {
+          requiredSkills = requiredSkills ? [requiredSkills] : [];
+        }
+      } catch (e) {
+        requiredSkills = [job.requiredSkills];
+      }
+    }
+
+    let candidateSkills = null;
+    if (application.skills) {
+      try {
+        candidateSkills =
+          typeof application.skills === 'string' ? JSON.parse(application.skills) : application.skills;
+        if (!Array.isArray(candidateSkills)) {
+          candidateSkills = candidateSkills ? [candidateSkills] : null;
+        }
+      } catch (e) {
+        candidateSkills = [application.skills];
+      }
+    }
+
+    const resumeExcerpt = extractResumeExcerpt(application, student);
+
+    const requestData = {
+      mode: session.mode,
+      job_title: job.title,
+      job_description: job.description,
+      required_skills: requiredSkills,
+      candidate_skills: candidateSkills,
+      resume_excerpt: resumeExcerpt,
+      candidate_profile: `${student?.name || 'Candidate'} — CGPA: ${application.cgpa ?? 'N/A'}, Backlogs: ${application.backlog ?? 0}`,
+      previous_questions: previousQuestions,
+      conversation_history: conversationHistory,
+      next_question_index: nextQuestionIndex,
+    };
+
+    let questionText;
+
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        questionText = await generateInterviewQuestionGemini({
+          mode: session.mode,
+          jobTitle: job.title,
+          jobDescription: job.description || '',
+          requiredSkills,
+          candidateSkills,
+          resumeExcerpt,
+          candidateName: student?.name || 'Candidate',
+          previousQuestions,
+          conversationHistory,
+          nextQuestionIndex,
+        });
+      } catch (geminiErr) {
+        console.error('[Interview] Gemini question generation failed:', geminiErr.message || geminiErr);
+        questionText = null;
+      }
+    }
+
+    if (!questionText) {
+      try {
+        const interviewServiceResponse = await axios.post(
+          `${INTERVIEW_SERVICE_URL}/generate-question`,
+          requestData,
+          { timeout: 30000 }
+        );
+        if (!interviewServiceResponse.data?.success) {
+          return { ok: false, message: 'Failed to generate question' };
+        }
+        questionText = interviewServiceResponse.data.question;
+      } catch (httpErr) {
+        console.error('[Interview] External service error:', httpErr.message || httpErr);
+        return {
+          ok: false,
+          message:
+            process.env.GEMINI_API_KEY
+              ? 'Failed to generate question (Gemini and interview service unavailable)'
+              : 'Failed to generate question. Set GEMINI_API_KEY in .env or run the interview microservice.',
+        };
+      }
+    }
+
+    const newQuestion = {
+      question: questionText,
+      index: questions.length,
+      timestamp: new Date().toISOString(),
+    };
+
+    questions.push(newQuestion);
+
+    await prisma.interviewSession.update({
+      where: { id: session.id },
+      data: {
+        questions: JSON.stringify(questions),
+        currentQuestionIndex: questions.length - 1,
+      },
+    });
+
+    return { ok: true, newQuestion, sessionId: session.id };
+  } catch (err) {
+    console.error('[Interview] runInterviewQuestionGeneration:', err);
+    return { ok: false, message: err.message || 'Failed to generate question' };
+  }
+}
 
 // Get all interviews for a job (Company)
 router.get('/:jobId/interviews', authenticateToken, authorizeCompany, async (req, res) => {
@@ -154,145 +396,39 @@ router.post('/:jobId/interviews/:applicationId/start', authenticateToken, author
   }
 });
 
-// Generate next question (Company)
+// Generate next question (Company) — same engine as auto-advance after candidate answers
 router.post('/:jobId/interviews/:applicationId/generate-question', authenticateToken, authorizeCompany, async (req, res) => {
   try {
     const companyId = req.user.id;
     const jobId = parseInt(req.params.jobId);
     const applicationId = parseInt(req.params.applicationId);
 
-    // Verify job belongs to company
     const job = await prisma.job.findFirst({
       where: { id: jobId, companyId },
-      include: {
-        applications: {
-          where: { id: applicationId },
-          include: {
-            student: true,
-          },
-        },
-      },
     });
 
     if (!job) {
       return res.status(404).json({ success: false, message: 'Job not found' });
     }
 
-    const application = job.applications[0];
-    if (!application) {
-      return res.status(404).json({ success: false, message: 'Application not found' });
-    }
-
-    // Get active interview session
-    const interview = await prisma.interview.findUnique({
-      where: { applicationId },
-      include: {
-        sessions: {
-          where: { status: { in: ['ACTIVE', 'STOPPED'] } },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
-      },
+    const result = await runInterviewQuestionGeneration(prisma, jobId, applicationId, {
+      requireActiveSession: false,
     });
 
-    if (!interview || interview.sessions.length === 0) {
-      return res.status(404).json({ success: false, message: 'No active interview session found' });
+    if (!result.ok) {
+      const status = result.message === 'Application not found' ? 404 : 500;
+      return res.status(status).json({ success: false, message: result.message });
     }
-
-    const session = interview.sessions[0];
-    const questions = JSON.parse(session.questions || '[]');
-    const previousQuestions = questions.map((q) => q.question);
-
-    // Prepare data for interview service
-    // Safe JSON parsing - handle both JSON strings and plain strings
-    let requiredSkills = [];
-    if (job.requiredSkills) {
-      try {
-        requiredSkills = typeof job.requiredSkills === 'string' 
-          ? JSON.parse(job.requiredSkills) 
-          : job.requiredSkills;
-        // If it's not an array after parsing, treat as single value
-        if (!Array.isArray(requiredSkills)) {
-          requiredSkills = requiredSkills ? [requiredSkills] : [];
-        }
-      } catch (e) {
-        // If not valid JSON, treat as single string value
-        requiredSkills = [job.requiredSkills];
-      }
-    }
-    
-    let candidateSkills = null;
-    if (application.skills) {
-      try {
-        candidateSkills = typeof application.skills === 'string'
-          ? JSON.parse(application.skills)
-          : application.skills;
-        // If it's not an array after parsing, treat as single value
-        if (!Array.isArray(candidateSkills)) {
-          candidateSkills = candidateSkills ? [candidateSkills] : null;
-        }
-      } catch (e) {
-        // If not valid JSON, treat as single string value
-        candidateSkills = [application.skills];
-      }
-    }
-
-    const requestData = {
-      mode: session.mode,
-      job_title: job.title,
-      job_description: job.description,
-      required_skills: requiredSkills,
-      candidate_skills: candidateSkills,
-      candidate_profile: `Student with CGPA: ${application.cgpa || 'N/A'}, Backlogs: ${application.backlog || 0}`,
-      previous_questions: previousQuestions,
-    };
-
-    // Call interview service to generate question
-    const interviewServiceResponse = await axios.post(
-      `${INTERVIEW_SERVICE_URL}/generate-question`,
-      requestData,
-      { timeout: 30000 }
-    );
-
-    if (!interviewServiceResponse.data.success) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to generate question',
-      });
-    }
-
-    const newQuestion = {
-      question: interviewServiceResponse.data.question,
-      index: questions.length,
-      timestamp: new Date().toISOString(),
-    };
-
-    questions.push(newQuestion);
-
-    // Update session with new question
-    await prisma.interviewSession.update({
-      where: { id: session.id },
-      data: {
-        questions: JSON.stringify(questions),
-        currentQuestionIndex: questions.length - 1,
-      },
-    });
 
     res.json({
       success: true,
       data: {
-        question: newQuestion,
-        sessionId: session.id,
+        question: result.newQuestion,
+        sessionId: result.sessionId,
       },
     });
   } catch (error) {
     console.error('Error generating question:', error);
-    if (error.response) {
-      return res.status(error.response.status || 500).json({
-        success: false,
-        message: error.response.data?.error || 'Failed to generate question',
-      });
-    }
     res.status(500).json({ success: false, message: 'Failed to generate question' });
   }
 });
@@ -302,7 +438,7 @@ router.post('/:jobId/interviews/:applicationId/generate-question', authenticateT
 router.post('/:jobId/interviews/:applicationId/submit-answer', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const userType = req.user.type; // 'student' or 'company'
+    const userType = req.user.userType; // JWT uses userType (not .type)
     const jobId = parseInt(req.params.jobId);
     const applicationId = parseInt(req.params.applicationId);
     const { answer, questionIndex, audio_data, video_frames, question } = req.body;
@@ -419,12 +555,74 @@ router.post('/:jobId/interviews/:applicationId/submit-answer', authenticateToken
       },
     });
 
+    let nextQuestionAuto = null;
+    let generationError = null;
+    const autoEnabled = process.env.INTERVIEW_AUTO_NEXT !== 'false';
+    const shouldAutoGenerate =
+      autoEnabled &&
+      userType === 'student' &&
+      session.status === 'ACTIVE' &&
+      answer &&
+      String(answer).trim() &&
+      !audio_data &&
+      !video_frames &&
+      questionIdx === questions.length - 1;
+
+    if (shouldAutoGenerate) {
+      const gen = await runInterviewQuestionGeneration(prisma, jobId, applicationId, {
+        requireActiveSession: true,
+      });
+      if (gen.ok) {
+        nextQuestionAuto = gen.newQuestion;
+      } else {
+        generationError = gen.message || 'Next question could not be generated';
+        console.warn('[Interview] Auto next question skipped:', generationError);
+      }
+    }
+
+    const freshSessionRow = await prisma.interviewSession.findUnique({
+      where: { id: session.id },
+    });
+    let sessionForClient = mergeSessionQuestionsWithAnswers(freshSessionRow);
+
+    let interviewCompleted = false;
+    if (
+      freshSessionRow &&
+      String(freshSessionRow.mode).toUpperCase() === 'TECH' &&
+      freshSessionRow.status === 'ACTIVE'
+    ) {
+      const qArr = JSON.parse(freshSessionRow.questions || '[]');
+      const ansArr = JSON.parse(freshSessionRow.answers || '[]');
+      const cap = getMaxQuestionsForSession(freshSessionRow);
+      if (qArr.length >= cap && everyQuestionHasAnswer(qArr, ansArr)) {
+        await prisma.interviewSession.update({
+          where: { id: session.id },
+          data: { status: 'COMPLETED', completedAt: new Date() },
+        });
+        await prisma.interview.update({
+          where: { id: interview.id },
+          data: { status: 'COMPLETED' },
+        });
+        interviewCompleted = true;
+        generationError = null;
+        const completedRow = await prisma.interviewSession.findUnique({
+          where: { id: session.id },
+        });
+        sessionForClient = mergeSessionQuestionsWithAnswers(completedRow);
+      }
+    }
+
     res.json({
       success: true,
       data: {
         answer: answerData,
         analysis: analysisResult,
         message: 'Answer submitted successfully',
+        nextQuestion: nextQuestionAuto || undefined,
+        autoGenerated: !!nextQuestionAuto,
+        session: sessionForClient,
+        generationError: interviewCompleted ? undefined : generationError || undefined,
+        interviewCompleted,
       },
     });
   } catch (error) {
@@ -506,7 +704,7 @@ router.get('/:jobId/interviews/:applicationId/student-session', authenticateToke
       where: { applicationId },
       include: {
         sessions: {
-          where: { status: { in: ['ACTIVE', 'STOPPED'] } },
+          where: { status: { in: ['ACTIVE', 'STOPPED', 'COMPLETED'] } },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
@@ -541,6 +739,7 @@ router.get('/:jobId/interviews/:applicationId/student-session', authenticateToke
           questions: questionsWithAnswers,
         },
         job: application.job,
+        techQuestionCap: getMaxQuestionsForSession(session),
       },
     });
   } catch (error) {
