@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -14,8 +14,29 @@ import {
   PhoneOff,
   User,
   Briefcase,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { API_BASE_URL } from '../config.js';
+import { getCurrentUser } from '../utils/auth.js';
+
+function normalizeDisplayName(raw) {
+  if (raw == null || raw === '') return '';
+  return String(raw).trim().replace(/\s+/g, ' ');
+}
+
+/** Spoken in order after Start — uses the same name as the backend / login profile when available. */
+function buildAiOpeningLines(displayName) {
+  const n = normalizeDisplayName(displayName);
+  const hi = n ? `Hi, ${n} — ` : 'Hi — ';
+  return [
+    `${hi}I'm your AI interviewer for IntelliPlace. I'll run this like a real hiring conversation: we'll touch your background, how you think, and how you might fit this role.`,
+    "I'll read each question aloud. You'll see the same words as captions on the main screen so you can follow along.",
+    n
+      ? `${n}, we'll start with your introduction — your first question is in the panel on the right. I'll read it aloud right after this.`
+      : "We'll start with your introduction — your first question is in the panel on the right. I'll read it aloud right after this.",
+  ];
+}
 
 /** student-session merges `answer` onto each question object */
 function findNextUnansweredAfter(questions, answeredIndex) {
@@ -45,13 +66,20 @@ const StudentInterview = ({
   questionIndex,
   onAnswerSubmitted,
   session: initialSession,
+  candidateDisplayName: candidateDisplayNameProp,
 }) => {
   const [session, setSession] = useState(initialSession || null);
+  const [candidateDisplayName, setCandidateDisplayName] = useState(
+    () => normalizeDisplayName(candidateDisplayNameProp) || normalizeDisplayName(getCurrentUser()?.name)
+  );
   const [currentQuestion, setCurrentQuestion] = useState(question || null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(
     questionIndex !== undefined ? questionIndex : -1
   );
   const [interviewStarted, setInterviewStarted] = useState(false);
+  /** lobby = before Start; opening = AI intro audio; qa = normal questions */
+  const [interviewFlowPhase, setInterviewFlowPhase] = useState('lobby');
+  const [captionText, setCaptionText] = useState('');
   const [loadingSession, setLoadingSession] = useState(false);
   const [answerText, setAnswerText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -61,10 +89,21 @@ const StudentInterview = ({
   const [micOn, setMicOn] = useState(true);
   const [videoOn, setVideoOn] = useState(true);
   const [qaPanelOpen, setQaPanelOpen] = useState(true);
+  const [autoSpeakQuestion, setAutoSpeakQuestion] = useState(true);
+  const [speakingQuestion, setSpeakingQuestion] = useState(false);
+  const [ttsError, setTtsError] = useState(null);
 
   const localVideoRef = useRef(null);
   const streamRef = useRef(null);
+  const ttsAudioRef = useRef(null);
+  const spokenQuestionKeyRef = useRef(null);
   const [localStreamReady, setLocalStreamReady] = useState(false);
+
+  const openingLines = useMemo(() => {
+    const n =
+      normalizeDisplayName(candidateDisplayName) || normalizeDisplayName(getCurrentUser()?.name);
+    return buildAiOpeningLines(n);
+  }, [candidateDisplayName]);
 
   const questionsList = (() => {
     if (!session?.questions) return [];
@@ -95,19 +134,40 @@ const StudentInterview = ({
     setLocalStreamReady(false);
   }, []);
 
+  const stopTts = useCallback(() => {
+    const audio = ttsAudioRef.current;
+    if (!audio) return;
+    try {
+      audio.pause();
+    } catch (_) {
+      // no-op
+    }
+    audio.src = '';
+    ttsAudioRef.current = null;
+    setSpeakingQuestion(false);
+  }, []);
+
   useEffect(() => {
     if (!isOpen) {
       stopMedia();
+      stopTts();
       setInterviewStarted(false);
+      setInterviewFlowPhase('lobby');
+      setCaptionText('');
       setCurrentQuestion(null);
       setCurrentQuestionIndex(-1);
       setAnswerText('');
       setSubmitted(false);
       setError(null);
+      setTtsError(null);
+      spokenQuestionKeyRef.current = null;
       setMicOn(true);
       setVideoOn(true);
+      setCandidateDisplayName(
+        normalizeDisplayName(candidateDisplayNameProp) || normalizeDisplayName(getCurrentUser()?.name)
+      );
     }
-  }, [isOpen, stopMedia]);
+  }, [isOpen, stopMedia, stopTts, candidateDisplayNameProp]);
 
   const fetchSession = useCallback(
     async (opts = {}) => {
@@ -124,6 +184,9 @@ const StudentInterview = ({
           const data = await res.json();
           if (data.data?.session) {
             setSession(data.data.session);
+            const cn = normalizeDisplayName(data.data?.candidateDisplayName);
+            if (cn) setCandidateDisplayName(cn);
+            return data.data.session;
           }
         } else if (res.status === 404) {
           setError('No active interview session found');
@@ -134,6 +197,7 @@ const StudentInterview = ({
       } finally {
         if (!silent) setLoadingSession(false);
       }
+      return null;
     },
     [jobId, applicationId]
   );
@@ -145,28 +209,26 @@ const StudentInterview = ({
   }, [isOpen, initialSession]);
 
   useEffect(() => {
-    if (isOpen && jobId && applicationId) {
-      if (!session) {
-        fetchSession();
-      } else {
-        const questions = Array.isArray(session.questions)
-          ? session.questions
-          : JSON.parse(session.questions || '[]');
-        const unansweredQ = questions.find((q) => !q.answer);
-        if (unansweredQ) {
-          setCurrentQuestion(unansweredQ.question);
-          setCurrentQuestionIndex(
-            unansweredQ.index !== undefined ? unansweredQ.index : questions.indexOf(unansweredQ)
-          );
-        }
-      }
+    if (!isOpen) return;
+    const cn = normalizeDisplayName(candidateDisplayNameProp);
+    if (cn) setCandidateDisplayName(cn);
+  }, [isOpen, candidateDisplayNameProp]);
+
+  useEffect(() => {
+    if (isOpen && jobId && applicationId && !session) {
+      fetchSession();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-load when opening or target application changes
   }, [isOpen, jobId, applicationId, fetchSession]);
 
 
   useEffect(() => {
-    if (!isOpen || !interviewStarted || !currentQuestion) {
+    if (!isOpen || !interviewStarted) {
+      stopMedia();
+      return;
+    }
+    const needCamera = interviewFlowPhase === 'opening' || !!currentQuestion;
+    if (!needCamera) {
       stopMedia();
       return;
     }
@@ -216,7 +278,7 @@ const StudentInterview = ({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, interviewStarted, currentQuestion, stopMedia]);
+  }, [isOpen, interviewStarted, interviewFlowPhase, currentQuestion, micOn, videoOn, stopMedia]);
 
   useEffect(() => {
     const stream = streamRef.current;
@@ -229,30 +291,91 @@ const StudentInterview = ({
     });
   }, [micOn, videoOn]);
 
-  // After company starts the interview, questions[] is empty until generate-question succeeds — poll until the first question exists.
+  // If session ever has no unanswered question (e.g. race), poll for updates.
   useEffect(() => {
-    if (!isOpen || !interviewStarted || currentQuestion) return;
+    if (!isOpen || !interviewStarted || currentQuestion || interviewFlowPhase === 'opening') return;
     const id = setInterval(() => {
       fetchSession({ silent: true });
     }, 3000);
     return () => clearInterval(id);
-  }, [isOpen, interviewStarted, currentQuestion, fetchSession]);
+  }, [isOpen, interviewStarted, currentQuestion, interviewFlowPhase, fetchSession]);
 
-  // When session updates (poll or submit), attach the next unanswered question — e.g. first question after interviewer generates it.
+  // When session updates (poll or submit), attach the next unanswered question — only after intro audio finished.
   useEffect(() => {
-    if (!isOpen || !session || !interviewStarted || currentQuestion) return;
-    const questions = Array.isArray(session.questions)
-      ? session.questions
-      : JSON.parse(session.questions || '[]');
-    const unansweredQ = questions.find((q) => !q.answer);
-    if (unansweredQ) {
-      setCurrentQuestion(unansweredQ.question);
-      setCurrentQuestionIndex(
-        unansweredQ.index !== undefined ? unansweredQ.index : questions.indexOf(unansweredQ)
-      );
-      setError(null);
+    if (!isOpen || !session || !interviewStarted || interviewFlowPhase !== 'qa' || currentQuestion) return;
+    try {
+      const questions = Array.isArray(session.questions)
+        ? session.questions
+        : JSON.parse(session.questions || '[]');
+      const unansweredQ = questions.find((q) => !q.answer);
+      if (unansweredQ) {
+        setCurrentQuestion(unansweredQ.question);
+        setCurrentQuestionIndex(
+          unansweredQ.index !== undefined ? unansweredQ.index : questions.indexOf(unansweredQ)
+        );
+        setError(null);
+      }
+    } catch (_) {
+      /* ignore */
     }
-  }, [session, isOpen, interviewStarted, currentQuestion]);
+  }, [session, isOpen, interviewStarted, interviewFlowPhase, currentQuestion]);
+
+  const speakPlainText = useCallback(
+    async (text) => {
+      const t = text?.trim();
+      if (!t || !jobId || !applicationId) return;
+      stopTts();
+      setSpeakingQuestion(true);
+      setTtsError(null);
+
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/interviews/${applicationId}/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ text: t.slice(0, 3000) }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        setSpeakingQuestion(false);
+        throw new Error(errJson.message || 'Failed to generate speech');
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      ttsAudioRef.current = audio;
+
+      await new Promise((resolve, reject) => {
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          setSpeakingQuestion(false);
+          resolve();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          setSpeakingQuestion(false);
+          reject(new Error('Could not play text-to-speech audio.'));
+        };
+        audio.play().catch((e) => {
+          URL.revokeObjectURL(url);
+          setSpeakingQuestion(false);
+          reject(e);
+        });
+      });
+    },
+    [jobId, applicationId, stopTts]
+  );
+
+  const playOpeningSequence = useCallback(async () => {
+    for (const line of openingLines) {
+      setCaptionText(line);
+      await speakPlainText(line);
+    }
+    setCaptionText('');
+  }, [speakPlainText, openingLines]);
 
   const handleStartInterview = () => {
     if (!session) {
@@ -260,27 +383,73 @@ const StudentInterview = ({
       return;
     }
 
-    const questions = Array.isArray(session.questions)
-      ? session.questions
-      : JSON.parse(session.questions || '[]');
-    const firstQuestion = questions[0];
+    setInterviewStarted(true);
+    setInterviewFlowPhase('opening');
+    setCurrentQuestion(null);
+    setCurrentQuestionIndex(-1);
+    setAnswerText('');
+    setSubmitted(false);
+    setError(null);
+    setTtsError(null);
+    setCaptionText('');
+    setQaPanelOpen(true);
 
-    if (firstQuestion) {
-      setCurrentQuestion(firstQuestion.question);
-      setCurrentQuestionIndex(firstQuestion.index !== undefined ? firstQuestion.index : 0);
-      setInterviewStarted(true);
-      setAnswerText('');
-      setSubmitted(false);
-      setError(null);
-      setQaPanelOpen(true);
-    } else {
-      // Session is active but interviewer has not generated Q1 yet (or generation is still in progress).
-      setInterviewStarted(true);
-      setError(null);
-      setQaPanelOpen(true);
-      fetchSession({ silent: true });
-    }
+    (async () => {
+      try {
+        await playOpeningSequence();
+      } catch (err) {
+        console.error('Opening TTS:', err);
+        setTtsError(err.message || 'Could not play introduction audio.');
+      } finally {
+        await fetchSession({ silent: true });
+        setInterviewFlowPhase('qa');
+        spokenQuestionKeyRef.current = null;
+        setCaptionText('');
+      }
+    })();
   };
+
+  const speakCurrentQuestion = useCallback(async () => {
+    if (!currentQuestion || !jobId || !applicationId) return;
+    setCaptionText(currentQuestion);
+    try {
+      await speakPlainText(currentQuestion);
+    } catch (err) {
+      console.error('TTS error:', err);
+      setTtsError(err.message || 'Failed to speak question');
+    }
+  }, [currentQuestion, jobId, applicationId, speakPlainText]);
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !interviewStarted ||
+      interviewFlowPhase !== 'qa' ||
+      !currentQuestion ||
+      !autoSpeakQuestion
+    ) {
+      return;
+    }
+    setTtsError(null);
+    const key = `${currentQuestionIndex}:${currentQuestion}`;
+    if (spokenQuestionKeyRef.current === key) return;
+    spokenQuestionKeyRef.current = key;
+    speakCurrentQuestion();
+  }, [
+    isOpen,
+    interviewStarted,
+    interviewFlowPhase,
+    currentQuestion,
+    currentQuestionIndex,
+    autoSpeakQuestion,
+    speakCurrentQuestion,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      stopTts();
+    };
+  }, [stopTts]);
 
   const handleSubmit = async () => {
     if (!answerText.trim()) {
@@ -428,13 +597,13 @@ const StudentInterview = ({
 
   const handleLeave = () => {
     stopMedia();
+    stopTts();
     onClose();
   };
 
   if (!isOpen) return null;
 
   const modeLabel = session?.mode === 'TECH' ? 'Technical' : 'HR';
-  const inMeeting = session && interviewStarted && currentQuestion;
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-[#1b1b1f] text-zinc-100 shadow-2xl">
@@ -454,9 +623,15 @@ const StudentInterview = ({
                   {modeLabel} ·{' '}
                   {session.status === 'COMPLETED'
                     ? 'Completed'
-                    : inMeeting && totalQuestions > 0
-                      ? `Question ${displayQNum} of ${totalQuestions}`
-                      : 'Waiting to start'}
+                    : !interviewStarted
+                      ? 'Waiting to start'
+                      : interviewFlowPhase === 'opening'
+                        ? 'Introduction · AI interviewer speaking'
+                        : currentQuestion && totalQuestions > 0
+                          ? showQuestionTotal
+                            ? `Question ${displayQNum} of ${totalQuestions}`
+                            : `Question ${displayQNum}`
+                          : 'Preparing your first question…'}
                 </>
               ) : (
                 'Connecting…'
@@ -483,11 +658,21 @@ const StudentInterview = ({
             <div className="mb-4 flex h-28 w-28 items-center justify-center rounded-full bg-zinc-800 ring-4 ring-zinc-700/50">
               <User className="h-14 w-14 text-zinc-500" strokeWidth={1.25} />
             </div>
-            <p className="text-lg font-medium text-zinc-200">Interviewer</p>
+            <p className="text-lg font-medium text-zinc-200">AI interviewer</p>
             <p className="mt-1 max-w-md px-6 text-center text-sm text-zinc-500">
-              Questions are tailored to the role, required skills, and your resume. Use the panel to type your answers.
+              {interviewFlowPhase === 'opening'
+                ? 'Introduction: audio plays automatically. Follow along with captions below.'
+                : 'When the AI speaks, captions appear at the bottom of this screen. Use the side panel to read the question and type your answer.'}
             </p>
           </div>
+
+          {captionText ? (
+            <div className="pointer-events-none absolute bottom-[calc(5.5rem+1rem)] left-0 right-0 z-20 flex justify-center px-4 sm:bottom-28">
+              <div className="max-h-[min(40vh,240px)] w-full max-w-3xl overflow-y-auto rounded-xl border border-zinc-700/80 bg-black/75 px-4 py-3 shadow-xl backdrop-blur-md">
+                <p className="text-center text-sm leading-relaxed text-zinc-100 sm:text-base">{captionText}</p>
+              </div>
+            </div>
+          ) : null}
 
           {/* Picture-in-picture: self view */}
           {!qaPanelOpen && session && (
@@ -563,13 +748,13 @@ const StudentInterview = ({
                       </p>
                     </div>
                   </div>
-                ) : !interviewStarted && !currentQuestion ? (
+                ) : !interviewStarted ? (
                   <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8 text-center">
                     <div>
                       <p className="text-lg font-medium text-white">Ready to join</p>
                       <p className="mt-2 text-sm text-zinc-400">
-                        {modeLabel} interview. When you start, your camera and mic may turn on for this
-                        session (you can mute or stop video anytime).
+                        {modeLabel} interview. When you start, the AI interviewer will introduce the session and then ask
+                        for your introduction — audio plays automatically with on-screen captions.
                       </p>
                     </div>
                     <button
@@ -581,6 +766,29 @@ const StudentInterview = ({
                       Start interview
                     </button>
                   </div>
+                ) : interviewFlowPhase === 'opening' ? (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-5 py-10 px-4 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-600/20">
+                      {speakingQuestion ? (
+                        <Loader className="h-7 w-7 animate-spin text-blue-400" />
+                      ) : (
+                        <Volume2 className="h-7 w-7 text-blue-400" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-lg font-medium text-white">AI interviewer · introduction</p>
+                      <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                        Listen to the introduction on the main screen. When it finishes, your first written question
+                        will appear here so you can answer in your own words.
+                      </p>
+                    </div>
+                    {ttsError && (
+                      <div className="flex w-full max-w-sm items-start gap-2 rounded-lg border border-amber-900/40 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{ttsError}</span>
+                      </div>
+                    )}
+                  </div>
                 ) : currentQuestion ? (
                   <>
                     <div className="mb-4 rounded-xl border border-zinc-700/80 bg-zinc-800/50 p-4">
@@ -589,12 +797,51 @@ const StudentInterview = ({
                         {showQuestionTotal && totalQuestions > 0 ? ` of ${totalQuestions}` : ''}
                       </p>
                       <p className="mt-2 text-sm leading-relaxed text-zinc-100">{currentQuestion}</p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={speakCurrentQuestion}
+                          disabled={speakingQuestion}
+                          className="inline-flex items-center gap-2 rounded-md border border-zinc-600 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-700/60 disabled:opacity-50"
+                        >
+                          {speakingQuestion ? (
+                            <>
+                              <Loader className="h-3.5 w-3.5 animate-spin" />
+                              Speaking...
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="h-3.5 w-3.5" />
+                              Read aloud
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAutoSpeakQuestion((v) => !v)}
+                          className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs ${
+                            autoSpeakQuestion
+                              ? 'border-blue-500 text-blue-300'
+                              : 'border-zinc-600 text-zinc-300'
+                          }`}
+                        >
+                          {autoSpeakQuestion ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+                          Auto-read {autoSpeakQuestion ? 'On' : 'Off'}
+                        </button>
+                      </div>
                     </div>
 
                     {error && (
                       <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-200">
                         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                         <span>{error}</span>
+                      </div>
+                    )}
+
+                    {ttsError && (
+                      <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-900/40 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{ttsError}</span>
                       </div>
                     )}
 
