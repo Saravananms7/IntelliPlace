@@ -106,10 +106,11 @@ const CompanyStartInterview = ({ isOpen, onClose, jobId, applicationId, applicat
         setMode(selectedMode);
         setSession(data.data.session);
         setInterviewStatus('ACTIVE');
-        setMessage({ type: 'success', text: 'Interview session started!' });
-        setTimeout(() => {
-          handleGenerateQuestion();
-        }, 500);
+        setMessage({
+          type: 'success',
+          text: 'Interview session started! The first question is the candidate self-introduction — generate the next question after they submit it.',
+        });
+        await fetchSession();
       } else {
         setMessage({ type: 'error', text: data.message || 'Failed to start interview' });
       }
