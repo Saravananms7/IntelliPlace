@@ -6,6 +6,53 @@ import { generateInterviewQuestion as generateInterviewQuestionGemini } from '..
 
 const router = express.Router();
 const INTERVIEW_SERVICE_URL = process.env.INTERVIEW_SERVICE_URL || 'http://localhost:8001';
+const ELEVENLABS_API_BASE = process.env.ELEVENLABS_API_BASE || 'https://api.elevenlabs.io';
+/**
+ * Default voice matches ElevenLabs quickstart (“George”); library voices may require a paid plan for API — use ELEVENLABS_VOICE_ID for a voice you own on free tier.
+ * @see https://elevenlabs.io/docs/capabilities/text-to-speech
+ */
+const ELEVENLABS_VOICE_ID_DEFAULT = 'JBFqnCBsd6RMkjVDRZzb';
+const ELEVENLABS_MODEL_ID_DEFAULT = 'eleven_v3';
+const ELEVENLABS_OUTPUT_FORMAT_DEFAULT = 'mp3_44100_128';
+
+function stripEnvQuotes(value) {
+  if (value == null) return '';
+  const s = String(value).trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+/** Same spelling as student profile / login payload `user.name` — used for Q1 and prompts. */
+function normalizeCandidateDisplayName(raw) {
+  if (raw == null) return '';
+  return String(raw).trim().replace(/\s+/g, ' ');
+}
+
+/** Fixed first question: candidate self-introduction (not AI-generated). */
+function buildSelfIntroductionQuestionRecord(displayName) {
+  const name = normalizeCandidateDisplayName(displayName);
+  const addr = name || 'Candidate';
+  return {
+    question: `${addr}, please introduce yourself: share your background, what you're studying or working on, skills or projects you'd like to highlight, and what drew you to this role. Take about one or two minutes.`,
+    index: 0,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function parseElevenLabsErrorBody(error) {
+  const data = error.response?.data;
+  if (Buffer.isBuffer(data)) {
+    try {
+      return JSON.parse(data.toString('utf8'));
+    } catch {
+      return { raw: data.toString('utf8') };
+    }
+  }
+  if (typeof data === 'object' && data !== null) return data;
+  return {};
+}
 
 /** Build ordered Q&A pairs for adaptive prompts (matches answers to question text by index). */
 function buildConversationHistory(questions, answers) {
@@ -134,6 +181,19 @@ async function runInterviewQuestionGeneration(prisma, jobId, applicationId, opti
       return { ok: false, message: 'Maximum interview questions reached' };
     }
 
+    if (questions.length === 0) {
+      const introRecord = buildSelfIntroductionQuestionRecord(student?.name);
+      questions.push(introRecord);
+      await prisma.interviewSession.update({
+        where: { id: session.id },
+        data: {
+          questions: JSON.stringify(questions),
+          currentQuestionIndex: 0,
+        },
+      });
+      return { ok: true, newQuestion: introRecord, sessionId: session.id };
+    }
+
     const answersArr = JSON.parse(session.answers || '[]');
     const previousQuestions = questions.map((q) => q.question);
     const conversationHistory = buildConversationHistory(questions, answersArr);
@@ -167,6 +227,8 @@ async function runInterviewQuestionGeneration(prisma, jobId, applicationId, opti
 
     const resumeExcerpt = extractResumeExcerpt(application, student);
 
+    const candidateDisplayName = normalizeCandidateDisplayName(student?.name) || 'Candidate';
+
     const requestData = {
       mode: session.mode,
       job_title: job.title,
@@ -174,7 +236,7 @@ async function runInterviewQuestionGeneration(prisma, jobId, applicationId, opti
       required_skills: requiredSkills,
       candidate_skills: candidateSkills,
       resume_excerpt: resumeExcerpt,
-      candidate_profile: `${student?.name || 'Candidate'} — CGPA: ${application.cgpa ?? 'N/A'}, Backlogs: ${application.backlog ?? 0}`,
+      candidate_profile: `${candidateDisplayName} — CGPA: ${application.cgpa ?? 'N/A'}, Backlogs: ${application.backlog ?? 0}`,
       previous_questions: previousQuestions,
       conversation_history: conversationHistory,
       next_question_index: nextQuestionIndex,
@@ -191,7 +253,7 @@ async function runInterviewQuestionGeneration(prisma, jobId, applicationId, opti
           requiredSkills,
           candidateSkills,
           resumeExcerpt,
-          candidateName: student?.name || 'Candidate',
+          candidateName: candidateDisplayName,
           previousQuestions,
           conversationHistory,
           nextQuestionIndex,
@@ -354,13 +416,15 @@ router.post('/:jobId/interviews/:applicationId/start', authenticateToken, author
       });
     }
 
-    // Create interview session
+    const introQuestion = buildSelfIntroductionQuestionRecord(application.student?.name);
+
+    // Create interview session (first question is always candidate self-intro, same name as profile/login)
     const session = await prisma.interviewSession.create({
       data: {
         interviewId: interview.id,
         mode: mode.toUpperCase(),
         status: 'ACTIVE',
-        questions: JSON.stringify([]),
+        questions: JSON.stringify([introQuestion]),
         currentQuestionIndex: 0,
       },
     });
@@ -692,6 +756,7 @@ router.get('/:jobId/interviews/:applicationId/student-session', authenticateToke
       where: { id: applicationId, studentId, jobId },
       include: {
         job: true,
+        student: { select: { name: true } },
       },
     });
 
@@ -730,6 +795,8 @@ router.get('/:jobId/interviews/:applicationId/student-session', authenticateToke
       };
     });
 
+    const candidateDisplayName = normalizeCandidateDisplayName(application.student?.name);
+
     res.json({
       success: true,
       data: {
@@ -740,6 +807,7 @@ router.get('/:jobId/interviews/:applicationId/student-session', authenticateToke
         },
         job: application.job,
         techQuestionCap: getMaxQuestionsForSession(session),
+        candidateDisplayName,
       },
     });
   } catch (error) {
@@ -890,5 +958,99 @@ router.post('/:jobId/interviews/:applicationId/complete', authenticateToken, aut
     res.status(500).json({ success: false, message: 'Failed to complete interview' });
   }
 });
+
+// Text-to-speech for interview question (Student)
+router.post(
+  '/:jobId/interviews/:applicationId/tts',
+  authenticateToken,
+  authorizeStudent,
+  async (req, res) => {
+    try {
+      const studentId = req.user.id;
+      const jobId = parseInt(req.params.jobId, 10);
+      const applicationId = parseInt(req.params.applicationId, 10);
+      const { text } = req.body || {};
+
+      if (!text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ success: false, message: 'Text is required for TTS' });
+      }
+      const apiKey = stripEnvQuotes(process.env.ELEVENLABS_API_KEY);
+      const voiceId = stripEnvQuotes(process.env.ELEVENLABS_VOICE_ID) || ELEVENLABS_VOICE_ID_DEFAULT;
+      if (!apiKey) {
+        return res.status(500).json({ success: false, message: 'ElevenLabs API key not configured' });
+      }
+
+      // Verify the application belongs to this student for the given job.
+      const application = await prisma.application.findFirst({
+        where: { id: applicationId, studentId, jobId },
+        select: { id: true },
+      });
+      if (!application) {
+        return res.status(404).json({ success: false, message: 'Application not found' });
+      }
+
+      const modelId = stripEnvQuotes(process.env.ELEVENLABS_MODEL_ID) || ELEVENLABS_MODEL_ID_DEFAULT;
+      const outputFormat =
+        stripEnvQuotes(process.env.ELEVENLABS_OUTPUT_FORMAT) || ELEVENLABS_OUTPUT_FORMAT_DEFAULT;
+      const ttsPath = `${ELEVENLABS_API_BASE.replace(/\/$/, '')}/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
+      const ttsUrl = `${ttsPath}?${new URLSearchParams({ output_format: outputFormat }).toString()}`;
+
+      const ttsRes = await axios.post(
+        ttsUrl,
+        {
+          text: text.trim().slice(0, 3000),
+          model_id: modelId,
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+          },
+        },
+        {
+          responseType: 'arraybuffer',
+          headers: {
+            'xi-api-key': apiKey,
+            'Content-Type': 'application/json',
+            Accept: 'audio/mpeg',
+          },
+          timeout: 30000,
+        }
+      );
+
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).send(Buffer.from(ttsRes.data));
+    } catch (error) {
+      const body = parseElevenLabsErrorBody(error);
+      const detail = body?.detail;
+      const d = typeof detail === 'object' && detail !== null ? detail : {};
+      const logMsg = Buffer.isBuffer(error.response?.data)
+        ? error.response.data.toString('utf8')
+        : JSON.stringify(body?.detail || body || error.message);
+      console.error('Error generating ElevenLabs TTS:', logMsg);
+
+      if (d.code === 'paid_plan_required' || d.type === 'payment_required') {
+        return res.status(402).json({
+          success: false,
+          code: 'paid_plan_required',
+          message:
+            'ElevenLabs free accounts cannot use premade library voices through the API. Fix one of: (1) Add ELEVENLABS_VOICE_ID to .env with a voice ID from ElevenLabs → Voices → a voice you created (Voice Design / your workspace, not the public library), then restart the server; or (2) Upgrade your ElevenLabs plan so API access to library voices is allowed.',
+        });
+      }
+
+      const providerMessage =
+        typeof d.message === 'string'
+          ? d.message
+          : typeof body?.message === 'string'
+            ? body.message
+            : typeof body?.raw === 'string'
+              ? body.raw
+              : error.message;
+      return res.status(500).json({
+        success: false,
+        message: providerMessage || 'Failed to generate speech',
+      });
+    }
+  }
+);
 
 export default router;
